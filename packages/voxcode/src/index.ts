@@ -5,7 +5,7 @@ import { runOpencode } from "./opencode"
 import { startSidecar, watchSidecar } from "./sidecar"
 import { requireXaiApiKey, xaiApiKeyStatus } from "./xai"
 
-const HELP = `voxcode — OpenCode with voice (local)
+const HELP = `voxcode — Vox Code with voice (local)
 
 Usage:
   voxcode [project]           start terminal UI (voice via /voice when XAI_API_KEY is set)

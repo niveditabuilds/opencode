@@ -51,6 +51,6 @@ export function voiceLogLines() {
   return [] as string[]
 }
 
-export function voiceLogStage(stage: "REPLY" | "TTS" | "API" | "PLAY" | "STATE", message: string) {
+export function voiceLogStage(stage: "REPLY" | "TTS" | "API" | "PLAY" | "STATE" | "RUNTIME" | "HARNESS", message: string) {
   voiceLog(`[${stage}] ${message}`)
 }

@@ -1,44 +1,12 @@
 import { Show } from "solid-js"
 import { Button } from "@opencode-ai/ui/button"
+import { MicIcon } from "@/components/brand"
 import type { VoiceDisplayState } from "./voice"
 import { voiceStatusKey } from "./voice"
-
-function MicIcon(props: { active: boolean; class?: string }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 20 20"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      class={props.class}
-      aria-hidden="true"
-    >
-      <rect
-        x="7.5"
-        y="3.75"
-        width="5"
-        height="8.75"
-        rx="2.5"
-        stroke="currentColor"
-        stroke-width="1.25"
-        fill={props.active ? "currentColor" : "none"}
-        fill-opacity={props.active ? "0.15" : "0"}
-      />
-      <path
-        d="M4.583 10a5.417 5.417 0 0 0 10.834 0M10 15.417V17.5"
-        stroke="currentColor"
-        stroke-width="1.25"
-        stroke-linecap="round"
-      />
-    </svg>
-  )
-}
 
 export function PromptVoiceComposer(props: {
   display: () => VoiceDisplayState
   statusHeader?: () => string | undefined
-  hearingText?: () => string
   showDisclosure: () => boolean
   onToggle: () => void
   onDismissDisclosure: () => void
@@ -54,8 +22,6 @@ export function PromptVoiceComposer(props: {
   const status = () => {
     const header = props.statusHeader?.()
     if (header) return props.t("prompt.voice.status.awaitingQuestionNamed", { header })
-    const heard = props.hearingText?.()?.trim()
-    if (props.display() === "hearing" && heard) return heard
     return props.t(voiceStatusKey(props.display()))
   }
 
@@ -91,7 +57,7 @@ export function PromptVoiceComposer(props: {
         </div>
       </Show>
 
-      <Show when={props.display() !== "off"}>
+      <Show when={props.display() !== "off" && props.display() !== "hearing"}>
         <span
           data-slot="voice-status"
           class="max-w-[min(100%,20rem)] truncate text-12-regular tabular-nums"
@@ -121,7 +87,7 @@ export function PromptVoiceComposer(props: {
           props.onToggle()
         }}
       >
-        <MicIcon active={props.display() !== "off"} />
+        <MicIcon active={props.display() !== "off"} class="size-4" />
       </Button>
     </div>
   )

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>opencode voice test</title>
+    <title>Vox Code voice test</title>
     <style>
       body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
       button { margin-right: 0.5rem; }
@@ -11,7 +11,7 @@
     </style>
   </head>
   <body>
-    <h1>Voice sidecar test</h1>
+    <h1>Vox Code voice test</h1>
     <p>Sidecar: <code id="sidecar"></code></p>
     <div class="status" id="status">idle</div>
     <button id="start">Start session</button>
@@ -123,7 +123,7 @@
         }
         streamUrl = data.stream;
         log("session " + data.id);
-        log("opencode " + data.opencode.sessionID);
+        log("voxcode " + data.opencode.sessionID);
         ws = new WebSocket(streamUrl);
         ws.binaryType = "arraybuffer";
         ws.onopen = () => log("stream connected");

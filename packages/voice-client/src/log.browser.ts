@@ -1,4 +1,4 @@
-export type VoiceLogStage = "REPLY" | "TTS" | "API" | "PLAY" | "STATE" | "RUNTIME"
+export type VoiceLogStage = "REPLY" | "TTS" | "API" | "PLAY" | "STATE" | "RUNTIME" | "HARNESS"
 
 const MAX_LINES = 800
 

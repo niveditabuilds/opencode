@@ -5,7 +5,8 @@ import { createVoice, type VoicePhase } from "@opencode-ai/voice-client/runtime"
 import type { VoiceProgressSnapshot } from "@opencode-ai/voice-client/api"
 import type { VoicePermissionReply } from "@opencode-ai/voice-client/panel"
 import { initVoiceLog, setVoiceLogEnabled, voiceLogLines } from "@opencode-ai/voice-client/log"
-import { looksLikeTrivialVoiceAck } from "@opencode-ai/voice-client/reply"
+import { speakAssistantReply } from "@opencode-ai/voice-client/speak"
+import { armVoiceReply, noteVoiceAction, voiceOutput } from "@opencode-ai/voice-client/store"
 import { hostedVoiceSidecarUrl } from "@/utils/hosted-url"
 
 export type { VoicePhase }
@@ -17,10 +18,6 @@ const statusKey: Record<VoiceDisplayState, string> = {
   hearing: "prompt.voice.status.hearing",
   working: "prompt.voice.status.working",
   speaking: "prompt.voice.status.speaking",
-  awaiting_reply: "prompt.voice.status.awaitingReply",
-  continuing: "prompt.voice.status.continuing",
-  awaiting_question: "prompt.voice.status.awaitingQuestion",
-  awaiting_permission: "prompt.voice.status.awaitingPermission",
 }
 
 export function voiceStatusKey(state: VoiceDisplayState) {
@@ -52,6 +49,14 @@ export type VoiceConnectOptions = {
   replyQuestion?: (input: { requestID: string; answers: QuestionAnswer[] }) => void
   rejectQuestion?: (input: { requestID: string }) => void
   replyPermission?: (input: { requestID: string; reply: VoicePermissionReply }) => void
+  voiceReplyProbe?: () => {
+    expected: number
+    users: number
+    userMessageID?: string
+    assistantCount: number
+    reply?: string
+    blocked?: string
+  }
 }
 
 export function createVoiceComposerState(options: { working: () => boolean; connect?: VoiceConnectOptions }) {
@@ -61,6 +66,17 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
   })
 
   let lastSpokenReplyKey = ""
+  let speakInFlight = false
+
+  const sidecarUrl = () => options.connect?.sidecarUrl?.() ?? voiceSidecarBaseUrl()
+
+  const ensureVoiceLog = () => {
+    initVoiceLog({
+      sidecarUrl: options.connect?.sidecarUrl ?? voiceSidecarBaseUrl,
+      active: () => voiceOutput.listenActive || voiceOutput.awaitingReply,
+    })
+    setVoiceLogEnabled(true)
+  }
 
   const voice = createVoice({
     transport: "browser",
@@ -86,22 +102,63 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
   })
 
   createEffect(() => {
-    if (!voice.active()) return
-    if (!voice.awaitingSpeak()) return
-    if (options.working()) return
+    voiceOutput.awaitingReply
+    voiceOutput.listenActive
+    options.working()
+    options.connect?.voiceReplyProbe?.()
+
+    if (!voiceOutput.awaitingReply) {
+      noteVoiceAction("skip: awaitingReply false")
+      return
+    }
+    if (options.working()) {
+      noteVoiceAction("skip: session working")
+      return
+    }
+
     const reply = options.connect?.assistantReplyForVoiceTurn?.()
-    if (!reply?.trim()) return
-    if (looksLikeTrivialVoiceAck(reply)) return
+    if (!reply?.trim()) {
+      const blocked = options.connect?.voiceReplyProbe?.().blocked
+      noteVoiceAction(blocked ? `skip: ${blocked}` : "skip: no reply")
+      return
+    }
     const replyKey = reply.trim()
-    if (lastSpokenReplyKey === replyKey) return
+    if (lastSpokenReplyKey === replyKey) {
+      noteVoiceAction("skip: already spoken this reply")
+      return
+    }
+    if (speakInFlight) {
+      noteVoiceAction("skip: speak in flight")
+      return
+    }
+
     lastSpokenReplyKey = replyKey
-    void voice.speakAssistantReply(reply)
+    speakInFlight = true
+    const mode = voiceOutput.listenActive ? "listen session" : "output only"
+    noteVoiceAction(`speak: ${reply.length} chars (${mode})`)
+
+    const speak = voiceOutput.listenActive
+      ? voice.submitAssistantReply(reply)
+      : speakAssistantReply({ sidecarUrl, reply, clearArmedOnDone: true })
+
+    void speak
+      .catch((error) => {
+        options.connect?.onError(error instanceof Error ? error.message : "voice speak failed")
+      })
+      .finally(() => {
+        speakInFlight = false
+      })
   })
 
-  const display = createMemo((): VoiceDisplayState => (voice.active() ? voice.phase() : "off"))
-  const active = createMemo(() => voice.active())
+  const display = createMemo((): VoiceDisplayState => {
+    if (voiceOutput.listenActive) return voice.phase()
+    if (voiceOutput.speaking) return "speaking"
+    if (voiceOutput.awaitingReply && options.working()) return "working"
+    return "off"
+  })
+
+  const active = createMemo(() => voiceOutput.listenActive)
   const statusHeader = createMemo(() => voice.questionHeader())
-  const hearingText = () => voice.hearing()
 
   const toggle = () => {
     if (voice.active()) {
@@ -115,11 +172,7 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
       options.connect.onError("prompt.voice.error.noSession")
       return
     }
-    initVoiceLog({
-      sidecarUrl: options.connect.sidecarUrl,
-      active: () => voice.active(),
-    })
-    setVoiceLogEnabled(true)
+    ensureVoiceLog()
     if (!store.disclosureDismissed) setStore("showDisclosure", true)
     voice.toggle()
   }
@@ -130,13 +183,25 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
     store,
     display,
     statusHeader,
-    hearingText,
     voiceLogLines: () => voiceLogLines(),
     active,
+    awaitingSpeak: () => voiceOutput.awaitingReply,
     toggle,
+    lastTtsAction: () => voiceOutput.lastAction,
     dismissDisclosure: () => {
       if (typeof localStorage !== "undefined") localStorage.setItem("opencode.voice.disclosure", "1")
       setStore({ showDisclosure: false, disclosureDismissed: true })
+    },
+    expectAssistantReply: (text?: string) => {
+      lastSpokenReplyKey = ""
+      ensureVoiceLog()
+      if (voice.active()) {
+        voice.expectAssistantReply(text)
+        return
+      }
+      armVoiceReply(
+        `armed TTS${text?.trim() ? ` preview="${text.trim().slice(0, 40)}"` : ""}`,
+      )
     },
     setPhase: (_phase: VoicePhase) => {},
   }
@@ -148,10 +213,7 @@ export function voiceComposerBorderClass(state: VoiceDisplayState) {
   if (state === "off") return ""
   if (state === "hearing" || state === "speaking") return "ring-1 ring-inset ring-icon-info-active/60"
   if (state === "working") return "ring-1 ring-inset ring-icon-interactive-base/40"
-  if (state === "awaiting_reply") return "ring-1 ring-inset ring-icon-info-active/40"
-  if (state === "continuing") return "ring-1 ring-inset ring-icon-info-active/50"
-  if (state === "awaiting_question" || state === "awaiting_permission") {
-    return "ring-1 ring-inset ring-icon-info-active/50"
-  }
   return "ring-1 ring-inset ring-border-base/80"
 }
+
+export { voiceOutput } from "@opencode-ai/voice-client/store"

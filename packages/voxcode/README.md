@@ -1,6 +1,6 @@
-# Voxcode
+# Vox Code
 
-**OpenCode with voice** — one local command that starts opencode and the voice sidecar.
+**Vox Code with voice** — one local command that starts the coding agent and the voice sidecar.
 
 ## Requirements
 

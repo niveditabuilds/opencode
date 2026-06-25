@@ -26,9 +26,8 @@ from .stream import require_xai_api_key
 from .stt import STTError
 from .tts import TTSError, default_tts
 from .tui_turn import ensure_opencode_reachable, run_tui_turn
-from .decider import decide_speech
-from .speech_plan import next_continuation_chunk, plan_final_speech
-from .voice_ack import ack_response
+from . import harness_store
+from .speech_plan import plan_final_speech
 from .voice_log import append_voice_web_log, ensure_voice_web_log, voice_web_log_path, web_voice_log_line
 from .voice_stream import _speak_text, handle_voice_stream
 
@@ -107,10 +106,8 @@ async def voice_config(_request: Request) -> JSONResponse:
                 "test": "GET /voice/test",
                 "session": "POST /voice/session",
                 "tui_turn": "POST /voice/tui/turn",
-                "decide": "POST /voice/decide",
                 "final_speak": "POST /voice/final-speak",
-                "continuation": "POST /voice/continuation-chunk",
-                "ack": "POST /voice/ack",
+                "update": "POST /voice/session/{voice_id}/update",
                 "log": "POST /voice/log",
                 "stream": "WSS /voice/session/{id}/stream",
             },
@@ -161,6 +158,7 @@ async def create_voice_session(request: Request) -> JSONResponse:
     )
     if composer and _web_voice_request(request):
         web_voice_log_line("STATE", f"session voice={voice.id} opencode={opencode_session_id}")
+    harness_store.create(voice.id)
     return JSONResponse(voice.to_dict(stream_url=_stream_url(request, voice.id)), status_code=201)
 
 
@@ -205,30 +203,6 @@ async def tui_voice_turn(request: Request) -> JSONResponse:
     return JSONResponse(result)
 
 
-async def voice_decide(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "request body must be JSON"}, status_code=400)
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
-
-    text = str(body.get("text") or "").strip()
-    if not text:
-        return JSONResponse({"error": "text is required"}, status_code=400)
-
-    phase = str(body.get("phase") or "listening").strip().lower()
-    progress = body.get("progress") if isinstance(body.get("progress"), dict) else None
-    result = decide_speech(
-        text=text,
-        phase=phase,
-        pending_offer=bool(body.get("pendingOffer")),
-        last_spoken=str(body.get("lastSpoken") or ""),
-        progress=progress,
-    )
-    return JSONResponse(result)
-
-
 async def voice_final_speak(request: Request) -> JSONResponse:
     try:
         body = await request.json()
@@ -247,37 +221,6 @@ async def voice_final_speak(request: Request) -> JSONResponse:
             f"plan parts={len(plan.get('parts', []))} offer={plan.get('hasOffer')} action={plan.get('actionOffer')}",
         )
     return JSONResponse(plan)
-
-
-async def voice_continuation_chunk(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "request body must be JSON"}, status_code=400)
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
-
-    full_text = str(body.get("fullText") or body.get("text") or "").strip()
-    spoken = str(body.get("spokenSoFar") or body.get("spoken") or "").strip()
-    if not full_text:
-        return JSONResponse({"error": "fullText is required"}, status_code=400)
-    return JSONResponse(next_continuation_chunk(full_text=full_text, spoken_so_far=spoken))
-
-
-async def voice_ack(request: Request) -> JSONResponse:
-    body: dict[str, object] = {}
-    try:
-        raw = await request.body()
-        if raw:
-            parsed = await request.json()
-            if isinstance(parsed, dict):
-                body = parsed
-    except json.JSONDecodeError:
-        body = {}
-    text = str(body.get("text") or "").strip()
-    progress = body.get("progress") if isinstance(body.get("progress"), dict) else None
-    periodic = bool(body.get("periodic"))
-    return JSONResponse(ack_response(text, progress, periodic=periodic))
 
 
 async def voice_speak(request: Request) -> JSONResponse:
@@ -333,6 +276,25 @@ async def voice_client_log(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "path": str(path)})
 
 
+async def voice_session_update(request: Request) -> JSONResponse:
+    voice_id = request.path_params["voice_id"]
+    voice = store.get(voice_id)
+    if not voice:
+        return JSONResponse({"error": "voice session not found"}, status_code=404)
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "request body must be JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
+
+    actions = await asyncio.to_thread(harness_store.apply_update, voice_id, body)
+    if _web_voice_request(request):
+        event = str(body.get("event") or body.get("kind") or "update")
+        web_voice_log_line("STATE", f"harness update voice={voice_id} event={event} actions={len(actions)}")
+    return JSONResponse({"ok": True, "actions": actions})
+
+
 async def get_voice_session(request: Request) -> JSONResponse:
     voice = store.get(request.path_params["voice_id"])
     if not voice:
@@ -363,12 +325,10 @@ def create_app() -> Starlette:
             Route("/voice/test", voice_test_page, methods=["GET"]),
             Route("/voice/session", create_voice_session, methods=["POST"]),
             Route("/voice/tui/turn", tui_voice_turn, methods=["POST"]),
-            Route("/voice/decide", voice_decide, methods=["POST"]),
             Route("/voice/final-speak", voice_final_speak, methods=["POST"]),
-            Route("/voice/continuation-chunk", voice_continuation_chunk, methods=["POST"]),
-            Route("/voice/ack", voice_ack, methods=["POST"]),
             Route("/voice/speak", voice_speak, methods=["POST"]),
             Route("/voice/log", voice_client_log, methods=["POST"]),
+            Route("/voice/session/{voice_id}/update", voice_session_update, methods=["POST"]),
             Route("/voice/session/{voice_id}", get_voice_session, methods=["GET"]),
             WebSocketRoute("/voice/session/{voice_id}/stream", voice_stream_ws),
         ],

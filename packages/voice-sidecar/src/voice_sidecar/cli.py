@@ -212,7 +212,7 @@ def _add_opencode_args(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="voice-stt",
-        description="opencode voice sidecar — local STT and opencode session control",
+        description="voxcode voice sidecar — local STT and session control",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     # Default (no subcommand) → live listen with sensible defaults.

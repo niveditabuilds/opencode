@@ -2,6 +2,7 @@ import { Component } from "solid-js"
 import { Dialog } from "@opencode-ai/ui/v2/dialog-v2"
 import { TabsV2 } from "@opencode-ai/ui/v2/tabs-v2"
 import { Icon } from "@opencode-ai/ui/icon"
+import { productName } from "@/voxcode"
 import { useLanguage } from "@/context/language"
 import { usePlatform } from "@/context/platform"
 import { SettingsGeneralV2 } from "./general"
@@ -56,7 +57,7 @@ export const DialogSettings: Component = () => {
               </div>
             </div>
             <div class="settings-v2-nav-footer">
-              <span>{language.t("app.name.desktop")}</span>
+              <span>{productName()}</span>
               <span>v{platform.version}</span>
             </div>
           </div>

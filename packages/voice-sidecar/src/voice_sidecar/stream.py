@@ -18,15 +18,23 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import ssl
 from typing import AsyncIterator, Callable
 from urllib.parse import urlencode
 
+import certifi
 import websockets
 
 from .audio import CHANNELS, SAMPLE_RATE
 from .stt import STTError
 
 EventHandler = Callable[[dict], None]
+
+
+def _websocket_ssl() -> ssl.SSLContext:
+    """CA bundle for WSS — macOS python.org builds often lack system certs."""
+    return ssl.create_default_context(cafile=certifi.where())
+
 
 _PLACEHOLDER_KEYS = frozenset(
     {
@@ -171,6 +179,7 @@ class XaiStreamingSTT:
             async with websockets.connect(
                 self.url,
                 additional_headers=headers,
+                ssl=_websocket_ssl(),
                 open_timeout=10,
                 close_timeout=5,
             ) as ws:
@@ -193,6 +202,7 @@ class XaiStreamingSTT:
             async with websockets.connect(
                 self.url,
                 additional_headers=headers,
+                ssl=_websocket_ssl(),
                 open_timeout=10,
                 close_timeout=5,
             ) as ws:

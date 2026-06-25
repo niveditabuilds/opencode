@@ -1,5 +1,15 @@
 import { voiceSidecarBaseUrl } from "#play"
 
+export type VoiceHarnessAction =
+  | "submit_turn"
+  | "redirect"
+  | "interrupt"
+  | "speak"
+  | "set_phase"
+  | "expect_reply"
+  | "clear_expect_reply"
+  | "trace"
+
 export type VoiceSidecarEvent =
   | { type: "ready"; voiceID: string; opencodeSessionID: string; sampleRate: number; encoding: string }
   | { type: "status"; state: string; text?: string; reason?: string; retry?: number }
@@ -7,6 +17,11 @@ export type VoiceSidecarEvent =
   | { type: "reply"; text: string }
   | { type: "tts"; format: string; encoding: string; data: string }
   | { type: "speak"; skipped?: boolean }
+  | { type: "action"; action: VoiceHarnessAction; text?: string; phase?: string; raw?: boolean; trigger?: string }
+  | { type: "audio.start"; trigger?: string; sampleRate?: number; codec?: string }
+  | { type: "audio.delta"; data: string }
+  | { type: "audio.end" }
+  | { type: "audio.error"; message: string }
   | { type: "error"; message: string }
 
 export type VoiceSessionInfo = {

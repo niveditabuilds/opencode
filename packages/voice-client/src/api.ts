@@ -1,8 +1,6 @@
 import { voiceLogStage } from "#log"
 import { voiceSidecarBaseUrl } from "#play"
 
-export type VoiceAckResult = { text: string; skip?: false } | { skip: true }
-
 export type VoiceProgressSnapshot = {
   reads: number
   searches: number
@@ -11,25 +9,12 @@ export type VoiceProgressSnapshot = {
   thinking: boolean
 }
 
-export type VoiceDecideResult = {
-  intent: "command" | "stop" | "status" | "redirect" | "reply"
-  reply?: "yes" | "no"
-  speak?: string
-}
-
 export type VoiceFinalSpeakPlan = {
   parts: string[]
   hasOffer: boolean
   fullText: string
   closingQuestion?: string | null
   actionOffer?: boolean
-}
-
-export type VoiceContinuationChunk = {
-  chunk: string
-  done: boolean
-  offer?: string
-  closingQuestion?: string | null
 }
 
 function resolveSidecarUrl(sidecarUrl?: string | (() => string)) {
@@ -72,36 +57,6 @@ async function postJson<T>(base: string, path: string, body: Record<string, unkn
   return data as T
 }
 
-export async function fetchVoiceAck(input?: {
-  sidecarUrl?: string | (() => string)
-  text?: string
-  progress?: VoiceProgressSnapshot
-  periodic?: boolean
-}) {
-  return postJson<VoiceAckResult>(resolveSidecarUrl(input?.sidecarUrl), "/voice/ack", {
-    text: input?.text ?? "",
-    progress: input?.progress,
-    periodic: input?.periodic ?? false,
-  })
-}
-
-export async function fetchVoiceDecide(input: {
-  sidecarUrl?: string | (() => string)
-  text: string
-  phase: string
-  pendingOffer?: boolean
-  lastSpoken?: string
-  progress?: VoiceProgressSnapshot
-}) {
-  return postJson<VoiceDecideResult>(resolveSidecarUrl(input.sidecarUrl), "/voice/decide", {
-    text: input.text,
-    phase: input.phase,
-    pendingOffer: input.pendingOffer ?? false,
-    lastSpoken: input.lastSpoken ?? "",
-    progress: input.progress,
-  })
-}
-
 export async function fetchVoiceFinalSpeak(input: { sidecarUrl?: string | (() => string); text: string }) {
   return postJson<VoiceFinalSpeakPlan>(resolveSidecarUrl(input.sidecarUrl), "/voice/final-speak", {
     text: input.text,
@@ -116,13 +71,14 @@ export async function fetchVoiceSpeak(input: { sidecarUrl?: string | (() => stri
   )
 }
 
-export async function fetchVoiceContinuationChunk(input: {
+export async function postVoiceSessionUpdate(input: {
   sidecarUrl?: string | (() => string)
-  fullText: string
-  spokenSoFar: string
+  voiceID: string
+  payload: Record<string, unknown>
 }) {
-  return postJson<VoiceContinuationChunk>(resolveSidecarUrl(input.sidecarUrl), "/voice/continuation-chunk", {
-    fullText: input.fullText,
-    spokenSoFar: input.spokenSoFar,
-  })
+  return postJson<{ ok: boolean; actions?: unknown[] }>(
+    resolveSidecarUrl(input.sidecarUrl),
+    `/voice/session/${input.voiceID}/update`,
+    input.payload,
+  )
 }

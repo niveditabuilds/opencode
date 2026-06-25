@@ -69,6 +69,7 @@ import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { createVoiceComposerState, voiceComposerBorderClass, voiceSidecarBaseUrl } from "./prompt-input/voice"
+import { VoiceDebugPanel } from "./prompt-input/voice-debug"
 import { buildVoiceProgressSnapshot, collectActiveTurnParts } from "@opencode-ai/voice-client/progress"
 import { PromptVoiceComposer } from "./prompt-input/voice-composer"
 import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
@@ -358,14 +359,67 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const working = createMemo(() => sync().data.session_working(props.controls.session.id ?? ""))
   const voiceTranscriptRef: { apply?: (text: string) => void; submit?: () => void } = {}
   let voiceTurnUserMessageID: string | undefined
-  let voiceTurnExpectedUsers = 0
+  const [voiceTurnExpectedUsers, setVoiceTurnExpectedUsers] = createSignal(0)
   const beginVoiceTurn = () => {
     const sessionID = props.controls.session.id
     voiceTurnUserMessageID = undefined
-    if (!sessionID) return
+    if (!sessionID) {
+      setVoiceTurnExpectedUsers(0)
+      return
+    }
     const messages = sync().data.message[sessionID] ?? []
-    voiceTurnExpectedUsers = messages.filter((message) => message.role === "user").length + 1
+    setVoiceTurnExpectedUsers(messages.filter((message) => message.role === "user").length + 1)
   }
+  const voiceReplyProbe = createMemo(() => {
+    const sessionID = props.controls.session.id
+    const expected = voiceTurnExpectedUsers()
+    if (!sessionID || expected === 0) {
+      return { expected, users: 0, assistantCount: 0, blocked: "expectedUsers=0" }
+    }
+    const messages = sync().data.message[sessionID] ?? []
+    const users = messages.filter((message) => message.role === "user")
+    if (users.length < expected) {
+      return {
+        expected,
+        users: users.length,
+        assistantCount: 0,
+        blocked: `waiting user message (${users.length}/${expected})`,
+      }
+    }
+    const userMessage = users[expected - 1]
+    if (!userMessage) {
+      return { expected, users: users.length, assistantCount: 0, blocked: "user message missing" }
+    }
+    if (!voiceTurnUserMessageID) voiceTurnUserMessageID = userMessage.id
+    const assistants = messages.filter(
+      (message) => message.role === "assistant" && message.parentID === voiceTurnUserMessageID,
+    )
+    for (let i = assistants.length - 1; i >= 0; i--) {
+      const message = assistants[i]
+      const parts = sync().data.part[message.id] ?? []
+      const text = parts
+        .filter((part) => part.type === "text" && !part.synthetic)
+        .map((part) => ("text" in part ? part.text : ""))
+        .join("")
+        .trim()
+      if (text) {
+        return {
+          expected,
+          users: users.length,
+          userMessageID: voiceTurnUserMessageID,
+          assistantCount: assistants.length,
+          reply: text,
+        }
+      }
+    }
+    return {
+      expected,
+      users: users.length,
+      userMessageID: voiceTurnUserMessageID,
+      assistantCount: assistants.length,
+      blocked: "assistant has no speakable text yet",
+    }
+  })
   const submitVoiceTurn = (text: string) => {
     beginVoiceTurn()
     voiceTranscriptRef.apply?.(text)
@@ -399,31 +453,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
         })
         return buildVoiceProgressSnapshot(parts)
       },
-      assistantReplyForVoiceTurn: () => {
-        const sessionID = props.controls.session.id
-        if (!sessionID || voiceTurnExpectedUsers === 0) return undefined
-        const messages = sync().data.message[sessionID] ?? []
-        const users = messages.filter((message) => message.role === "user")
-        if (users.length < voiceTurnExpectedUsers) return undefined
-
-        const userMessage = users[voiceTurnExpectedUsers - 1]
-        if (!userMessage) return undefined
-        if (!voiceTurnUserMessageID) voiceTurnUserMessageID = userMessage.id
-
-        const assistants = messages.filter(
-          (message) => message.role === "assistant" && message.parentID === voiceTurnUserMessageID,
-        )
-        for (let i = assistants.length - 1; i >= 0; i--) {
-          const message = assistants[i]
-          const parts = sync().data.part[message.id] ?? []
-          const text = parts
-            .filter((part) => part.type === "text" && !part.synthetic)
-            .map((part) => ("text" in part ? part.text : ""))
-            .join("")
-            .trim()
-          if (text) return text
-        }
-      },
+      assistantReplyForVoiceTurn: () => voiceReplyProbe().reply,
+      voiceReplyProbe: () => voiceReplyProbe(),
       pendingQuestion: () => props.voicePanel?.pendingQuestion(),
       pendingPermission: () => props.voicePanel?.pendingPermission(),
       replyQuestion: (input) => props.voicePanel?.replyQuestion(input),
@@ -1309,7 +1340,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return permission.isAutoAccepting(id, sdk().directory)
   })
 
-  const { abort, handleSubmit } =
+  const { abort, handleSubmit: submitPrompt } =
     props.submission ??
     createPromptSubmit({
       prompt,
@@ -1336,9 +1367,28 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       onSubmit: props.onSubmit,
     })
 
+  let voiceSubmitFromStt = false
+  const promptText = () =>
+    prompt
+      .current()
+      .filter((part) => part.type === "text")
+      .map((part) => part.content)
+      .join("")
+      .trim()
+
+  const handleSubmit = (event: Event) => {
+    if (!voiceSubmitFromStt) {
+      beginVoiceTurn()
+      voice.expectAssistantReply(promptText())
+    }
+    return submitPrompt(event)
+  }
+
   voiceTranscriptRef.submit = () => {
     voicePreviewActive = false
+    voiceSubmitFromStt = true
     void handleSubmit(new Event("submit"))
+    voiceSubmitFromStt = false
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
@@ -1627,6 +1677,15 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   return (
     <div class="relative size-full flex flex-col gap-0">
+      <VoiceDebugPanel
+        display={voice.display}
+        active={voice.active}
+        awaitingSpeak={voice.awaitingSpeak}
+        working={working}
+        sidecarUrl={voiceSidecarBaseUrl}
+        logLines={voice.voiceLogLines}
+        lastAction={voice.lastTtsAction}
+      />
       {(promptReady(), null)}
       <PromptPopover
         popover={store.popover}
@@ -1654,7 +1713,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           <PromptVoiceComposer
             display={voice.display}
             statusHeader={voice.statusHeader}
-            hearingText={voice.hearingText}
             showDisclosure={() => voice.store.showDisclosure}
             onToggle={voice.toggle}
             onDismissDisclosure={voice.dismissDisclosure}
@@ -1757,7 +1815,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       design
                       display={voice.display}
                       statusHeader={voice.statusHeader}
-                      hearingText={voice.hearingText}
                       showDisclosure={() => voice.store.showDisclosure}
                       onToggle={voice.toggle}
                       onDismissDisclosure={voice.dismissDisclosure}
@@ -1976,7 +2033,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                     <PromptVoiceComposer
                       display={voice.display}
                       statusHeader={voice.statusHeader}
-                      hearingText={voice.hearingText}
                       showDisclosure={() => voice.store.showDisclosure}
                       onToggle={voice.toggle}
                       onDismissDisclosure={voice.dismissDisclosure}
