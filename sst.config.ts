@@ -36,7 +36,6 @@ export default $config({
       return {
         AppUrl: voice.appUrl,
         OpencodeServerUrl: voice.opencodeServer.url,
-        VoiceSidecarUrl: voice.voiceSidecar.url,
         AwsStage: stage.awsStage,
       }
     }

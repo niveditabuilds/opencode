@@ -2,7 +2,7 @@
 #   fly apps create opencode-voice-ui
 #   fly deploy . --config packages/app/fly.toml
 #
-# Update [build.args] if your server/sidecar app names differ.
+# Update [build.args] if your server app name differs.
 
 app = "opencode-voice-ui"
 primary_region = "iad"
@@ -12,7 +12,6 @@ primary_region = "iad"
 
   [build.args]
     VITE_OPENCODE_SERVER_URL = "https://opencode-voice-server.fly.dev"
-    VITE_VOICE_SIDECAR_URL = "https://opencode-voice-sidecar.fly.dev"
     OPENCODE_CHANNEL = "beta"
 
 [http_service]

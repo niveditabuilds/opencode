@@ -21,11 +21,9 @@ RUN bun install --filter @opencode-ai/app --frozen-lockfile --ignore-scripts
 FROM base AS build
 
 ARG VITE_OPENCODE_SERVER_URL=https://opencode-voice-server.fly.dev
-ARG VITE_VOICE_SIDECAR_URL=https://opencode-voice-sidecar.fly.dev
 ARG OPENCODE_CHANNEL=beta
 
 ENV VITE_OPENCODE_SERVER_URL=$VITE_OPENCODE_SERVER_URL
-ENV VITE_VOICE_SIDECAR_URL=$VITE_VOICE_SIDECAR_URL
 ENV OPENCODE_CHANNEL=$OPENCODE_CHANNEL
 
 COPY --from=installer /app ./

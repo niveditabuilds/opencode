@@ -63,7 +63,6 @@ const webAppBuildEnv = (() => {
   if ($app.stage !== "voice-staging") return {}
   return {
     VITE_OPENCODE_SERVER_URL: `https://server.${domain}`,
-    VITE_VOICE_SIDECAR_URL: `https://voice.${domain}`,
     OPENCODE_CHANNEL: "beta",
   }
 })()
