@@ -18,7 +18,7 @@ Built on top of [**OpenCode**](https://opencode.ai) · [tryvoxcode.vercel.app](h
 
 - `XAI_API_KEY` from [console.x.ai](https://console.x.ai)
 - For **dev** from source: [OpenCode](https://opencode.ai) or this repo
-- For **built bundles**: no Python required
+- For **built bundles**: nothing extra — the bundle is self-contained
 - TUI voice streaming playback requires **ffmpeg** (`ffplay`) on PATH
 
 ## Quick start (dev)

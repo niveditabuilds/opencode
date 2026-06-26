@@ -19,6 +19,15 @@ export class XaiStreamingStt {
       interim_results: "true",
       language,
     })
+    // End-of-turn detection. xAI's fixed `endpointing` (default 10ms) finalizes the utterance on
+    // the slightest pause between words, so partials never stream and short phrases get cut. Use
+    // Smart Turn instead: an ML model decides at each silence boundary whether the speaker actually
+    // finished a thought (otherwise the event is demoted to chunk_final and we keep listening),
+    // with a timeout as a safety cap so the turn always closes after a real pause.
+    const smartTurn = process.env.VOICE_STT_SMART_TURN ?? "0.7"
+    const smartTurnTimeout = process.env.VOICE_STT_SMART_TURN_TIMEOUT_MS ?? "2000"
+    query.set("smart_turn", smartTurn)
+    query.set("smart_turn_timeout", smartTurnTimeout)
     this.#url = `${xaiWsBase()}/stt?${query}`
   }
 

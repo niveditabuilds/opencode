@@ -112,6 +112,59 @@ This is used internally and can be invoked using `@general` in messages.
 
 Learn more about [agents](https://opencode.ai/docs/agents).
 
+### Voxcode — voice mode
+
+**[Voxcode](packages/voxcode/README.md)** is a voice-native layer built on top of OpenCode — one local command starts the OpenCode agent (TUI or web) with speech-to-text and text-to-speech wired in, so you can talk to it instead of typing. Live preview: [tryvoxcode.vercel.app](https://tryvoxcode.vercel.app).
+
+**Prerequisites**
+
+- [Bun](https://bun.sh) (used to build and run from source)
+- An `XAI_API_KEY` from [console.x.ai](https://console.x.ai) — required for voice
+- `ffmpeg` (`ffplay`) on your `PATH` — only for TUI voice playback
+
+**Run from source (no build)**
+
+```sh
+export XAI_API_KEY="xai-…"
+
+# from the repo root
+bun run --cwd packages/voxcode dev          # terminal UI + voice
+bun run --cwd packages/voxcode dev web      # browser UI + voice
+bun run --cwd packages/voxcode dev tui ./my-project
+```
+
+**Build a standalone bundle**
+
+`make dist` compiles both `opencode` and `voxcode` into a self-contained bundle for your machine (no Bun needed to run it afterward):
+
+```sh
+make dist
+# → packages/voxcode/dist/voxcode-<os>-<arch>/bin/{voxcode,opencode}
+
+# reuse the previous opencode binary for a faster rebuild
+SKIP_OPENCODE=1 make dist
+
+make clean   # remove local dist artifacts
+make help    # list available targets
+```
+
+**Run the bundle**
+
+```sh
+export XAI_API_KEY="xai-…"
+export PATH="$PWD/packages/voxcode/dist/voxcode-$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')/bin:$PATH"
+
+voxcode          # terminal UI + voice
+voxcode web      # browser UI + voice
+voxcode tui .    # voice in the current directory
+voxcode run …    # pass-through to opencode (no voice)
+```
+
+See [`packages/voxcode/README.md`](packages/voxcode/README.md) for the full command and environment-variable reference.
+
+> [!NOTE]
+> Voxcode is an experimental project that builds on OpenCode. It is not an official OpenCode product and is not affiliated with the OpenCode team.
+
 ### Documentation
 
 For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).

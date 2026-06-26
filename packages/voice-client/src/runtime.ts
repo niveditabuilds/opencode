@@ -24,8 +24,15 @@ export type { VoicePhase, TuiVoicePhase } from "./types"
 
 const FEED_INTERVAL_MS = 8000
 
+// Barge-in: on full-duplex transports we keep the mic live while the agent speaks so the user can
+// talk over it. The browser's AEC (echoCancellation in getUserMedia) removes the agent's own voice;
+// the TUI has no AEC, so it stays half-duplex (mic muted while speaking).
+const BARGE_IN_GRACE_MS = 400 // ignore the mic right after audio.start while AEC converges
+const BARGE_IN_MIN_CHARS = 3 // require a real word, not an echo blip, before stopping playback
+
 export function createVoice(options: VoiceOptions) {
   const transport = options.transport ?? "terminal"
+  const fullDuplex = transport === "browser"
   const [active, setActive] = createSignal(false)
   const [phase, setPhase] = createSignal<VoicePhase>("off")
   const [hearing, setHearing] = createSignal("")
@@ -43,6 +50,7 @@ export function createVoice(options: VoiceOptions) {
   let feedTimer: ReturnType<typeof setInterval> | undefined
   let sink: AudioSink | undefined
   let audioGeneration = 0
+  let speakingSince = 0
 
   const sidecar = () =>
     options.sidecarUrl?.() ??
@@ -115,7 +123,8 @@ export function createVoice(options: VoiceOptions) {
     audioGeneration++
     sink?.stop()
     ttsActive = true
-    stream.setMicEnabled(false)
+    speakingSince = Date.now()
+    if (!fullDuplex) stream.setMicEnabled(false)
     setVoiceOutput("speaking", true)
     setDisplayPhase("speaking")
     sink = createAudioSink({ sampleRate: sampleRate || 24000 })
@@ -157,7 +166,8 @@ export function createVoice(options: VoiceOptions) {
     if (!trimmed || !running) return
     const generation = ++playGeneration
     ttsActive = true
-    stream.setMicEnabled(false)
+    speakingSince = Date.now()
+    if (!fullDuplex) stream.setMicEnabled(false)
     setVoiceOutput("speaking", true)
     setDisplayPhase("speaking")
     try {
@@ -230,6 +240,15 @@ export function createVoice(options: VoiceOptions) {
 
   // ----- events (sidecar → client) -------------------------------------
 
+  // Decide whether a transcript while the agent is speaking is a real barge-in. Wait out the AEC
+  // convergence window after audio.start, and require more than an echo blip for non-final partials.
+  const bargeInReady = (event: Extract<VoiceSidecarEvent, { type: "transcript" }>) => {
+    if (Date.now() - speakingSince < BARGE_IN_GRACE_MS) return false
+    const text = event.text.trim()
+    if (event.speechFinal) return text.length > 0
+    return text.length >= BARGE_IN_MIN_CHARS
+  }
+
   const handleEvent = (event: ReturnType<typeof parseVoiceSidecarEvent>) => {
     if (!event) return
     if (event.type === "ready") {
@@ -261,6 +280,14 @@ export function createVoice(options: VoiceOptions) {
       return
     }
     if (event.type === "transcript") {
+      // Barge-in: the mic is live during playback on full-duplex transports. If the user talks over
+      // the agent, stop the speaker and hand the floor back; the harness router decides whether the
+      // new utterance is a fresh turn or a redirect once it streams in.
+      if (fullDuplex && ttsActive) {
+        if (!bargeInReady(event)) return // echo residue or too soon after audio.start — keep speaking
+        voiceLogStage("STATE", `barge-in "${event.text.slice(0, 40)}"`)
+        stopPlayback()
+      }
       if (event.text.trim() && !event.speechFinal) {
         voiceLogStage("STATE", `transcript-partial "${event.text.slice(0, 40)}"`)
         setHearing(event.text)
