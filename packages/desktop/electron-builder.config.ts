@@ -67,6 +67,11 @@ const getBase = (appId: string): Configuration => ({
     gatekeeperAssess: false,
     entitlements: "resources/entitlements.plist",
     entitlementsInherit: "resources/entitlements.plist",
+    // Required alongside the audio-input entitlement: macOS shows this string in the mic TCC prompt
+    // and terminates the app on mic access if it is missing. Used by voice mode.
+    extendInfo: {
+      NSMicrophoneUsageDescription: "OpenCode uses the microphone for voice mode.",
+    },
     notarize: true,
     target: ["dmg", "zip"],
   },

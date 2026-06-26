@@ -17,7 +17,10 @@ const rendererProtocol = "oc"
 const rendererHost = "renderer"
 const clipboardWritePermission = "clipboard-sanitized-write"
 const notificationPermission = "notifications"
-const rendererPermissions = new Set([clipboardWritePermission, notificationPermission])
+// "media" covers getUserMedia for voice-mode microphone capture. It is only ever granted to the
+// trusted renderer URL (see allowRendererPermissions), so untrusted content cannot reach the mic.
+const mediaPermission = "media"
+const rendererPermissions = new Set([clipboardWritePermission, notificationPermission, mediaPermission])
 const oc2Theme = oc2ThemeJson as DesktopTheme
 const oc2Background = {
   light: resolveThemeVariant(oc2Theme.light, false)["background-base"],
@@ -353,12 +356,21 @@ function addDocumentPolicy(response: Response, file: string) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
 
+// Voice mode needs the microphone but never the camera. Reject a "media" request that asks for
+// video so a renderer can't quietly turn on the webcam.
+function mediaTypesAllowed(details: { mediaTypes?: string[] }) {
+  const types = details.mediaTypes
+  if (!types || types.length === 0) return true
+  return types.every((type) => type === "audio")
+}
+
 function allowRendererPermissions(win: BrowserWindow) {
   win.webContents.session.setPermissionRequestHandler((webContents, permission, callback, details) => {
     callback(
       rendererPermissions.has(permission) &&
         isTrustedRendererUrl(details.requestingUrl) &&
-        webContents.id === win.webContents.id,
+        webContents.id === win.webContents.id &&
+        (permission !== mediaPermission || mediaTypesAllowed(details as { mediaTypes?: string[] })),
     )
   })
   win.webContents.session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
