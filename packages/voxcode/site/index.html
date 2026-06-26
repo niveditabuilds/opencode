@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voxcode — voice-native coding agent</title>
+<meta name="description" content="Voxcode — talk to your coding agent. Incoming." />
+<meta property="og:title" content="Voxcode" />
+<meta property="og:description" content="Voice-native coding agent. Incoming." />
+<meta property="og:image" content="/mic.jpeg" />
+<meta name="theme-color" content="#000000" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #000000;
+    --fg: #ffffff;
+    --muted: #6e6e73;
+    --line: rgba(255,255,255,0.12);
+    --accent: #e7000b; /* xAI / SpaceX red, used sparingly */
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Inter", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .stage {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1.05fr 0.95fr;
+  }
+
+  /* ---- left: content ---- */
+  .panel {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: clamp(1.6rem, 4vw, 3.2rem);
+  }
+
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--fg);
+  }
+  .top .glyph {
+    width: 16px; height: 16px;
+    border: 1.5px solid var(--fg);
+    border-radius: 4px;
+    display: grid; place-items: center;
+  }
+  .top .glyph::after {
+    content: ""; width: 4px; height: 7px; border-radius: 3px;
+    background: var(--fg);
+  }
+
+  .center { align-self: start; margin-top: auto; }
+
+  h1 {
+    font-weight: 600;
+    font-size: clamp(3.4rem, 9vw, 8.5rem);
+    line-height: 0.92;
+    letter-spacing: -0.045em;
+    margin-bottom: 1.6rem;
+  }
+  h1 .mark { color: var(--accent); }
+
+  .tag {
+    font-family: "JetBrains Mono", monospace;
+    font-size: clamp(0.72rem, 1.4vw, 0.9rem);
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--muted);
+    max-width: 30ch;
+    line-height: 1.9;
+  }
+
+  .bottom {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.74rem;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--fg);
+  }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    animation: blink 1.5s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+  /* ---- right: mic hero ---- */
+  .hero {
+    position: relative;
+    overflow: hidden;
+  }
+  .hero img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+    animation: slowzoom 24s ease-in-out infinite alternate;
+  }
+  @keyframes slowzoom {
+    from { transform: scale(1.02); }
+    to   { transform: scale(1.12); }
+  }
+  /* blend the photo's dark edge into the black panel */
+  .hero::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, #000 0%, rgba(0,0,0,0.55) 14%, transparent 42%);
+    pointer-events: none;
+  }
+
+  /* subtle film grain over everything */
+  .grain {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none;
+    opacity: 0.05; mix-blend-mode: screen;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  /* entrance */
+  .panel > * { animation: rise .9s cubic-bezier(.2,.8,.2,1) both; }
+  .center { animation-delay: .08s; }
+  .bottom { animation-delay: .16s; }
+  @keyframes rise { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+
+  @media (max-width: 820px) {
+    .stage { grid-template-columns: 1fr; }
+    .hero { position: fixed; inset: 0; z-index: 1; }
+    .hero::after {
+      background: linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.65) 55%, #000 100%);
+    }
+    .panel { z-index: 3; justify-content: flex-end; min-height: 100%; }
+    .top { position: absolute; top: clamp(1.6rem,6vw,3rem); left: clamp(1.6rem,6vw,3rem); }
+    .center { margin-top: 0; margin-bottom: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="panel">
+      <div class="top">
+        <span class="glyph"></span>
+        Voxcode
+      </div>
+
+      <div class="center">
+        <h1>Vox<span class="mark">code</span></h1>
+        <p class="tag">Voice-native coding agent.<br />Talk. It writes the code.</p>
+      </div>
+
+      <div class="bottom">
+        <span class="status"><span class="dot"></span>Incoming</span>
+        <span>2026</span>
+      </div>
+    </div>
+
+    <div class="hero">
+      <img src="/mic.jpeg" alt="Voxcode microphone" />
+    </div>
+  </div>
+
+  <div class="grain"></div>
+</body>
+</html>

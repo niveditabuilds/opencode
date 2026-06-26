@@ -6,7 +6,7 @@ import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { MarkedProvider } from "@opencode-ai/ui/context/marked"
 import { File } from "@opencode-ai/ui/file"
 import { Font } from "@opencode-ai/ui/font"
-import { Splash } from "@opencode-ai/ui/logo"
+import { BrandSplash } from "@/components/brand"
 import { ThemeProvider } from "@opencode-ai/ui/theme/context"
 import { MetaProvider } from "@solidjs/meta"
 import { type BaseRouterProps, Navigate, Route, Router, useParams, useSearchParams } from "@solidjs/router"
@@ -329,7 +329,7 @@ function ConnectionGate(props: ParentProps<{ disableHealthCheck?: boolean }>) {
       when={!checking()}
       fallback={
         <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base">
-          <Splash class="w-16 h-20 opacity-50 animate-pulse" />
+          <BrandSplash class="w-16 h-20 opacity-50 animate-pulse" />
         </div>
       }
     >
@@ -368,7 +368,7 @@ function ConnectionError(props: { onRetry?: () => void; onServerSelected?: (key:
   return (
     <div class="h-dvh w-screen flex flex-col items-center justify-center bg-background-base gap-6 p-6">
       <div class="flex flex-col items-center max-w-md text-center">
-        <Splash class="w-12 h-15 mb-4" />
+        <BrandSplash class="w-12 h-15 mb-4" />
         <p class="text-14-regular text-text-base">
           {unreachable()[0]}
           <span class="text-text-strong font-medium">{name()}</span>

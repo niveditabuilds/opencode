@@ -35,6 +35,7 @@
         "@opencode-ai/core": "workspace:*",
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
+        "@opencode-ai/voice-client": "workspace:*",
         "@pierre/trees": "1.0.0-beta.4",
         "@sentry/solid": "catalog:",
         "@shikijs/transformers": "3.9.2",
@@ -538,6 +539,7 @@
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/server": "workspace:*",
         "@opencode-ai/tui": "workspace:*",
+        "@opencode-ai/voice-server": "workspace:*",
         "@openrouter/ai-sdk-provider": "2.9.0",
         "@opentelemetry/api": "1.9.0",
         "@opentelemetry/context-async-hooks": "2.6.1",
@@ -801,6 +803,7 @@
         "@opencode-ai/plugin": "workspace:*",
         "@opencode-ai/sdk": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
+        "@opencode-ai/voice-client": "workspace:*",
         "@opentui/core": "catalog:",
         "@opentui/keymap": "catalog:",
         "@opentui/solid": "catalog:",
@@ -867,6 +870,52 @@
         "vite": "catalog:",
         "vite-plugin-icons-spritesheet": "3.0.1",
         "vite-plugin-solid": "catalog:",
+      },
+    },
+    "packages/voice-client": {
+      "name": "@opencode-ai/voice-client",
+      "version": "1.17.8",
+      "dependencies": {
+        "@opencode-ai/sdk": "workspace:*",
+        "solid-js": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
+    "packages/voice-harness": {
+      "name": "@opencode-ai/voice-harness",
+      "version": "1.17.8",
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
+    "packages/voice-server": {
+      "name": "@opencode-ai/voice-server",
+      "version": "1.17.8",
+      "dependencies": {
+        "@opencode-ai/voice-harness": "workspace:*",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
+    "packages/voxcode": {
+      "name": "voxcode",
+      "version": "0.0.0",
+      "bin": {
+        "voxcode": "./bin/voxcode",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
       },
     },
     "packages/web": {
@@ -1821,6 +1870,12 @@
     "@opencode-ai/tui": ["@opencode-ai/tui@workspace:packages/tui"],
 
     "@opencode-ai/ui": ["@opencode-ai/ui@workspace:packages/ui"],
+
+    "@opencode-ai/voice-client": ["@opencode-ai/voice-client@workspace:packages/voice-client"],
+
+    "@opencode-ai/voice-harness": ["@opencode-ai/voice-harness@workspace:packages/voice-harness"],
+
+    "@opencode-ai/voice-server": ["@opencode-ai/voice-server@workspace:packages/voice-server"],
 
     "@opencode-ai/web": ["@opencode-ai/web@workspace:packages/web"],
 
@@ -3642,7 +3697,7 @@
 
     "get-tsconfig": ["get-tsconfig@4.14.0", "", { "dependencies": { "resolve-pkg-maps": "^1.0.0" } }, "sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA=="],
 
-    "ghostty-web": ["ghostty-web@github:anomalyco/ghostty-web#20bd361", {}, "anomalyco-ghostty-web-20bd361", "sha512-dW0nwaiBBcun9y5WJSvm3HxDLe5o9V0xLCndQvWonRVubU8CS1PHxZpLffyPt1YujPWC13ez03aWxcuKBPYYGQ=="],
+    "ghostty-web": ["ghostty-web@github:anomalyco/ghostty-web#513463a", {}, "anomalyco-ghostty-web-513463a", "sha512-GZR8LSmgGzViWnBJrqRI8MpAZRCJxhcr1Hi9Tyeh7YRooHZQjK9J97FQRD3tbBaM2wjq05gzGY2UEsG+JtZeBw=="],
 
     "giget": ["giget@2.0.0", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.0", "defu": "^6.1.4", "node-fetch-native": "^1.6.6", "nypm": "^0.6.0", "pathe": "^2.0.3" }, "bin": { "giget": "dist/cli.mjs" } }, "sha512-L5bGsVkxJbJgdnwyuheIunkGatUF/zssUoxxjACCseZYAVbaqdh9Tsmmlkl8vYan09H7sbvKt4pS8GqKLBrEzA=="],
 
@@ -5299,6 +5354,8 @@
     "volar-service-typescript-twoslash-queries": ["volar-service-typescript-twoslash-queries@0.0.70", "", { "dependencies": { "vscode-uri": "^3.0.8" }, "peerDependencies": { "@volar/language-service": "~2.4.0" }, "optionalPeers": ["@volar/language-service"] }, "sha512-IdD13Z9N2Bu8EM6CM0fDV1E69olEYGHDU25X51YXmq8Y0CmJ2LNj6gOiBJgpS5JGUqFzECVhMNBW7R0sPdRTMQ=="],
 
     "volar-service-yaml": ["volar-service-yaml@0.0.70", "", { "dependencies": { "vscode-uri": "^3.0.8", "yaml-language-server": "~1.20.0" }, "peerDependencies": { "@volar/language-service": "~2.4.0" }, "optionalPeers": ["@volar/language-service"] }, "sha512-0c8bXDBeoATF9F6iPIlOuYTuZAC4c+yi0siQo920u7eiBJk8oQmUmg9cDUbR4+Gl++bvGP4plj3fErbJuPqdcQ=="],
+
+    "voxcode": ["voxcode@workspace:packages/voxcode"],
 
     "vscode-css-languageservice": ["vscode-css-languageservice@6.3.10", "", { "dependencies": { "@vscode/l10n": "^0.0.18", "vscode-languageserver-textdocument": "^1.0.12", "vscode-languageserver-types": "3.17.5", "vscode-uri": "^3.1.0" } }, "sha512-eq5N9Er3fC4vA9zd9EFhyBG90wtCCuXgRSpAndaOgXMh1Wgep5lBgRIeDgjZBW9pa+332yC9+49cZMW8jcL3MA=="],
 

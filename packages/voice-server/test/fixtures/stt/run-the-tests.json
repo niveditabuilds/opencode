@@ -1,0 +1,9 @@
+{
+  "phrase": "Run the tests.",
+  "sampleRate": 16000,
+  "channels": 1,
+  "encoding": "pcm16",
+  "pcmBytes": 38400,
+  "wav": "run-the-tests.wav",
+  "pcm": "run-the-tests.pcm"
+}

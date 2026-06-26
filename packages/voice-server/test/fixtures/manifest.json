@@ -1,0 +1,10 @@
+{
+  "generatedAt": "2026-06-26T06:43:38.507Z",
+  "stt": [
+    "stt/run-the-tests.json"
+  ],
+  "tts": [
+    "tts/hello-world.json",
+    "tts/offer-phrase.json"
+  ]
+}

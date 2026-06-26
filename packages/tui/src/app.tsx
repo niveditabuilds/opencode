@@ -133,6 +133,7 @@ const appBindingCommands = [
 
 export type TuiInput = {
   url: string
+  serverUrl?: string
   args: Args
   config: TuiConfig.Resolved
   onSnapshot?: () => Promise<string[]>
@@ -287,6 +288,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                       <PluginRuntimeProvider value={pluginRuntime}>
                                         <SDKProvider
                                           url={input.url}
+                                          serverUrl={input.serverUrl}
                                           directory={input.directory}
                                           fetch={input.fetch}
                                           headers={input.headers}
@@ -439,25 +441,28 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
   createEffect(() => {
     if (!terminalTitleEnabled() || Flag.OPENCODE_DISABLE_TERMINAL_TITLE) return
 
+    const app = "Vox Code"
+    const prefix = "VC"
+
     if (route.data.type === "home") {
-      renderer.setTerminalTitle("OpenCode")
+      renderer.setTerminalTitle(app)
       return
     }
 
     if (route.data.type === "session") {
       const session = sync.session.get(route.data.sessionID)
       if (!session || isDefaultTitle(session.title)) {
-        renderer.setTerminalTitle("OpenCode")
+        renderer.setTerminalTitle(app)
         return
       }
 
       const title = session.title.length > 40 ? session.title.slice(0, 37) + "..." : session.title
-      renderer.setTerminalTitle(`OC | ${title}`)
+      renderer.setTerminalTitle(`${prefix} | ${title}`)
       return
     }
 
     if (route.data.type === "plugin") {
-      renderer.setTerminalTitle(`OC | ${route.data.id}`)
+      renderer.setTerminalTitle(`${prefix} | ${route.data.id}`)
     }
   })
 
@@ -1037,7 +1042,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     await DialogAlert.show(
       dialog,
       "Update Complete",
-      `Successfully updated to OpenCode v${result.data.version}. Please restart the application.`,
+      `Successfully updated to Vox Code v${result.data.version}. Please restart the application.`,
     )
 
     void exit()
