@@ -29,15 +29,9 @@ export function hostedOpencodeServerUrl() {
   return location.origin
 }
 
-/** Voice sidecar base URL (STT/TTS media plane). */
+/** Voice HTTP base URL (STT/TTS/session/log at /voice/* on the OpenCode server). */
 export function hostedVoiceSidecarUrl() {
   const explicit = import.meta.env.VITE_VOICE_SIDECAR_URL
   if (explicit) return trimSlash(explicit)
-
-  if (typeof location === "undefined") return "http://127.0.0.1:8765"
-
-  const stageDomain = hostedStageDomain(location.hostname)
-  if (stageDomain) return `https://voice.${stageDomain}`
-
-  return "http://127.0.0.1:8765"
+  return hostedOpencodeServerUrl()
 }

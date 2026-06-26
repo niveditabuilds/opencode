@@ -25,10 +25,9 @@ from .sessions import store
 from .stream import require_xai_api_key
 from .stt import STTError
 from .tts import TTSError, default_tts
-from .tui_turn import ensure_opencode_reachable, run_tui_turn
 from . import harness_store
 from .speech_plan import plan_final_speech
-from .voice_log import append_voice_web_log, ensure_voice_web_log, voice_web_log_path, web_voice_log_line
+from .voice_log import append_entries, append_voice_web_log, ensure_voxcode_log, voxcode_log_path, web_voice_log_line
 from .voice_stream import _speak_text, handle_voice_stream
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -88,7 +87,8 @@ async def health(_request: Request) -> JSONResponse:
             "opencode": opencode,
             "stt": stt,
             "tts": tts,
-            "voiceWebLog": str(voice_web_log_path()),
+            "voiceWebLog": str(voxcode_log_path()),
+            "voxcodeLog": str(voxcode_log_path()),
         }
     )
 
@@ -105,7 +105,6 @@ async def voice_config(_request: Request) -> JSONResponse:
                 "config": "GET /voice/config",
                 "test": "GET /voice/test",
                 "session": "POST /voice/session",
-                "tui_turn": "POST /voice/tui/turn",
                 "final_speak": "POST /voice/final-speak",
                 "update": "POST /voice/session/{voice_id}/update",
                 "log": "POST /voice/log",
@@ -147,60 +146,26 @@ async def create_voice_session(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=502)
 
     composer = bool(body.get("composer"))
-    terminal_mic = bool(body.get("terminalMic") or body.get("terminal_mic"))
     voice = store.create(
         opencode_url=client.url,
         opencode_session_id=opencode_session_id,
         directory=directory,
         agent=agent,
         composer=composer,
-        terminal_mic=terminal_mic,
     )
-    if composer and _web_voice_request(request):
-        web_voice_log_line("STATE", f"session voice={voice.id} opencode={opencode_session_id}")
+    from .voice_log import set_log_context, write_log
+
+    transport = "web" if composer else "tui"
+    set_log_context(voice.id, voiceId=voice.id, sessionId=opencode_session_id, transport=transport)
+    write_log(
+        "STATE",
+        f"session created transport={transport} composer={composer}",
+        voice_id=voice.id,
+        session_id=opencode_session_id,
+        transport=transport,
+    )
     harness_store.create(voice.id)
     return JSONResponse(voice.to_dict(stream_url=_stream_url(request, voice.id)), status_code=201)
-
-
-async def tui_voice_turn(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return JSONResponse({"error": "request body must be JSON"}, status_code=400)
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
-
-    directory = body.get("directory") or os.environ.get("OPENCODE_DIRECTORY")
-    if not directory:
-        return JSONResponse(
-            {"error": "directory is required (JSON field or OPENCODE_DIRECTORY env)"},
-            status_code=400,
-        )
-    directory = str(Path(directory).resolve())
-
-    session_id = body.get("sessionID") or body.get("session_id")
-    if not session_id:
-        return JSONResponse({"error": "sessionID is required"}, status_code=400)
-
-    opencode_url = _resolve_opencode_url(body.get("server"))
-    agent = body.get("agent") or os.environ.get("OPENCODE_AGENT")
-
-    try:
-        await ensure_opencode_reachable(opencode_url, directory)
-        result = await run_tui_turn(
-            opencode_url=str(opencode_url),
-            directory=directory,
-            session_id=str(session_id),
-            agent=str(agent) if agent else None,
-        )
-    except OpencodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
-    except STTError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
-    except TTSError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=502)
-
-    return JSONResponse(result)
 
 
 async def voice_final_speak(request: Request) -> JSONResponse:
@@ -268,12 +233,16 @@ async def voice_client_log(request: Request) -> JSONResponse:
         return JSONResponse({"error": "request body must be JSON"}, status_code=400)
     if not isinstance(body, dict):
         return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
+    entries = body.get("entries")
+    if isinstance(entries, list):
+        normalized = [dict(entry) for entry in entries if isinstance(entry, dict)]
+        path = append_entries(normalized)
+        return JSONResponse({"ok": True, "path": str(path), "count": len(normalized)})
     lines = body.get("lines")
-    if not isinstance(lines, list):
-        return JSONResponse({"error": "lines must be an array"}, status_code=400)
-    path = append_voice_web_log([str(line) for line in lines])
-    print(f"voice-web: {len(lines)} line(s) -> {path}", flush=True)
-    return JSONResponse({"ok": True, "path": str(path)})
+    if isinstance(lines, list):
+        path = append_voice_web_log([str(line) for line in lines])
+        return JSONResponse({"ok": True, "path": str(path), "count": len(lines)})
+    return JSONResponse({"error": "entries or lines must be an array"}, status_code=400)
 
 
 async def voice_session_update(request: Request) -> JSONResponse:
@@ -289,9 +258,6 @@ async def voice_session_update(request: Request) -> JSONResponse:
         return JSONResponse({"error": "request body must be a JSON object"}, status_code=400)
 
     actions = await asyncio.to_thread(harness_store.apply_update, voice_id, body)
-    if _web_voice_request(request):
-        event = str(body.get("event") or body.get("kind") or "update")
-        web_voice_log_line("STATE", f"harness update voice={voice_id} event={event} actions={len(actions)}")
     return JSONResponse({"ok": True, "actions": actions})
 
 
@@ -317,14 +283,13 @@ async def voice_test_page(_request: Request) -> FileResponse:
 
 
 def create_app() -> Starlette:
-    ensure_voice_web_log()
+    ensure_voxcode_log()
     app = Starlette(
         routes=[
             Route("/health", health, methods=["GET"]),
             Route("/voice/config", voice_config, methods=["GET"]),
             Route("/voice/test", voice_test_page, methods=["GET"]),
             Route("/voice/session", create_voice_session, methods=["POST"]),
-            Route("/voice/tui/turn", tui_voice_turn, methods=["POST"]),
             Route("/voice/final-speak", voice_final_speak, methods=["POST"]),
             Route("/voice/speak", voice_speak, methods=["POST"]),
             Route("/voice/log", voice_client_log, methods=["POST"]),

@@ -19,6 +19,7 @@ from starlette.websockets import WebSocket, WebSocketState
 
 from .tts import TTSError
 from .tts_stream import XaiTtsStream
+from .voice_log import write_log
 
 
 class Speaker:
@@ -49,12 +50,15 @@ class Speaker:
             await self._send(
                 {"type": "audio.start", "trigger": trigger, "sampleRate": self._tts.sample_rate, "codec": "pcm"}
             )
+            write_log("TTS", f"audio.start trigger={trigger} chars={len(body)}")
             try:
                 async for pcm in self._tts.synthesize(body, should_continue=should_continue):
                     if not should_continue():
                         break
                     await self._send({"type": "audio.delta", "data": base64.b64encode(pcm).decode("ascii")})
             except TTSError as exc:
+                write_log("TTS", f"audio.error trigger={trigger} message={exc}")
                 await self._send({"type": "audio.error", "message": str(exc)})
             finally:
+                write_log("TTS", f"audio.end trigger={trigger}")
                 await self._send({"type": "audio.end"})

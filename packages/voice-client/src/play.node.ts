@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { writeFile, unlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -11,6 +11,35 @@ export function stopMp3() {
   voiceLogStage("PLAY", "stop player")
   player.kill("SIGKILL")
   player = undefined
+}
+
+function requireFfplay() {
+  const check = spawnSync("ffplay", ["-version"], { stdio: "ignore" })
+  if (check.error || check.status !== 0) {
+    throw new Error("ffplay is required for TUI voice playback — install ffmpeg (e.g. brew install ffmpeg)")
+  }
+}
+
+function spawnStreamPlayer(sampleRate: number) {
+  stopMp3()
+  const args = [
+    "-nodisp",
+    "-autoexit",
+    "-loglevel",
+    "error",
+    "-f",
+    "s16le",
+    "-ar",
+    String(sampleRate),
+    "-ac",
+    "1",
+    "-i",
+    "pipe:0",
+  ]
+  voiceLogStage("PLAY", `stream spawn ffplay ${args.join(" ")}`)
+  const child = spawn("ffplay", args, { stdio: ["pipe", "ignore", "ignore"] })
+  player = child
+  return child
 }
 
 function run(command: string, args: string[]) {
@@ -73,69 +102,65 @@ export type AudioSink = {
 }
 
 /**
- * No Web Audio in the terminal, so buffer the streamed PCM and play it once at the end by
- * wrapping it in a WAV container. Not low-latency, but keeps terminal voice functional.
+ * Stream raw PCM16 mono to ffplay stdin so playback starts as chunks arrive.
+ * ffplay is bundled with ffmpeg, which TUI voice already requires for mic capture.
  */
 export function createAudioSink(opts: { sampleRate: number }): AudioSink {
-  const chunks: Uint8Array[] = []
   let stopped = false
+  let child: ChildProcess | undefined
+  let stdin: NodeJS.WritableStream | undefined
+  let checkedFfplay = false
+  let count = 0
+  let bytesWritten = 0
+
+  const ensurePlayer = () => {
+    if (child || stopped) return
+    if (!checkedFfplay) {
+      requireFfplay()
+      checkedFfplay = true
+    }
+    child = spawnStreamPlayer(opts.sampleRate)
+    stdin = child.stdin ?? undefined
+    if (!stdin) throw new Error("ffplay stream player failed to open stdin")
+  }
 
   const push = (pcm: Uint8Array) => {
-    if (!stopped) chunks.push(pcm)
+    if (stopped || !pcm.byteLength) return
+    ensurePlayer()
+    if (!stdin || stopped) return
+    stdin.write(pcm)
+    count++
+    bytesWritten += pcm.byteLength
   }
 
   const end = async () => {
-    if (stopped) return
-    const total = chunks.reduce((sum, c) => sum + c.byteLength, 0)
-    if (!total) return
-    const pcm = new Uint8Array(total)
-    let offset = 0
-    for (const chunk of chunks) {
-      pcm.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-    const wav = wrapWav(pcm, opts.sampleRate)
-    const file = join(tmpdir(), `opencode-voice-${Date.now()}.wav`)
-    await writeFile(file, wav)
-    try {
-      await playFile(file)
-    } finally {
-      await unlink(file).catch(() => {})
-    }
+    if (stopped || !child || !stdin || !bytesWritten) return
+    const active = child
+    const input = stdin
+    await new Promise<void>((resolve) => {
+      active.once("exit", () => resolve())
+      input.end()
+    })
+    if (player === active) player = undefined
+    child = undefined
+    stdin = undefined
+    voiceLogStage("PLAY", `stream end after ${count} chunks`)
   }
 
   const stop = () => {
+    if (stopped) return
     stopped = true
+    voiceLogStage("PLAY", "stream stop")
+    if (child) {
+      child.kill("SIGKILL")
+      if (player === child) player = undefined
+    }
+    child = undefined
+    stdin = undefined
     stopMp3()
   }
 
   return { push, end, stop }
-}
-
-function wrapWav(pcm: Uint8Array, sampleRate: number) {
-  const header = new Uint8Array(44)
-  const view = new DataView(header.buffer)
-  const writeStr = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
-  }
-  const byteRate = sampleRate * 2
-  writeStr(0, "RIFF")
-  view.setUint32(4, 36 + pcm.byteLength, true)
-  writeStr(8, "WAVE")
-  writeStr(12, "fmt ")
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, 1, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, byteRate, true)
-  view.setUint16(32, 2, true)
-  view.setUint16(34, 16, true)
-  writeStr(36, "data")
-  view.setUint32(40, pcm.byteLength, true)
-  const out = new Uint8Array(44 + pcm.byteLength)
-  out.set(header, 0)
-  out.set(pcm, 44)
-  return out
 }
 
 export { voiceSidecarBaseUrl } from "#sidecar-url"

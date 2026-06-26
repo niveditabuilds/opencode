@@ -1,27 +1,23 @@
 /**
  * Thin voice runtime: transport + action executor.
  *
- * All conversation intelligence lives in the Python sidecar harness. This client only:
- * - streams mic audio (browser WSS PCM, or terminal PortAudio on the sidecar),
+ * Conversation intelligence lives in the OpenCode voice harness (same server process). This client:
+ * - captures mic audio locally and streams PCM to the voice server,
  * - mirrors partial transcripts to the "hearing" UI,
  * - posts activity updates (working / progress / turn_complete) to the harness,
  * - obeys the actions the harness emits (submit_turn / interrupt / speak / set_phase / …).
- *
- * There are no client-side heuristics. The only constants here are mechanical: how often
- * to feed activity to the harness. Every decision and every spoken phrase is chosen by the
- * sidecar's LLM prompts.
  */
 
 import { createSignal, onCleanup } from "solid-js"
 import { postVoiceSessionUpdate } from "./api"
 import { createVoiceStreamTransport, type ConnectParams } from "./listen"
-import { setVoiceLogListener, voiceLogStage } from "#log"
-import { createAudioSink, stopMp3, voiceSidecarBaseUrl, type AudioSink } from "#play"
+import { clearVoiceLogContext, setVoiceLogContext, setVoiceLogListener, voiceLogStage } from "#log"
+import { createAudioSink, stopMp3, type AudioSink } from "#play"
 import { base64ToBytes, speakText as speakTextOutput } from "./speak"
 import { createVoiceSidecarSession, parseVoiceSidecarEvent, type VoiceSidecarEvent } from "./sidecar"
 import { armVoiceReply, clearVoiceReplyArmed, setVoiceOutput, voiceOutput } from "./store"
 import type { VoiceOptions, VoicePhase } from "./types"
-import { voiceControlPlaneUrl } from "./url"
+import { voiceControlPlaneUrl, voiceStreamUrl } from "./url"
 
 export type { VoiceOptions, TuiVoiceOptions } from "./types"
 export type { VoicePhase, TuiVoicePhase } from "./types"
@@ -37,6 +33,7 @@ export function createVoice(options: VoiceOptions) {
 
   setVoiceLogListener((line: string) => setDebug(line))
   onCleanup(() => setVoiceLogListener(undefined))
+  setVoiceLogContext({ transport: transport === "browser" ? "web" : "tui" })
   voiceLogStage("STATE", "voice runtime ready")
 
   let running = false
@@ -47,7 +44,9 @@ export function createVoice(options: VoiceOptions) {
   let sink: AudioSink | undefined
   let audioGeneration = 0
 
-  const sidecar = () => options.sidecarUrl?.() ?? voiceSidecarBaseUrl()
+  const sidecar = () =>
+    options.sidecarUrl?.() ??
+    voiceControlPlaneUrl({ url: options.opencodeUrl(), serverUrl: options.serverUrl?.() })
 
   const setDisplayPhase = (next: VoicePhase) => {
     if (!active()) return
@@ -74,6 +73,7 @@ export function createVoice(options: VoiceOptions) {
 
   const startFeed = () => {
     if (!voiceID) return
+    voiceLogStage("STATE", "post working=true (start-feed)")
     void postUpdate({ event: "working", working: true })
     if (feedTimer) return
     feedTimer = setInterval(() => {
@@ -96,6 +96,7 @@ export function createVoice(options: VoiceOptions) {
   // speak action this client plays.
   const submitAssistantReply = (reply: string) => {
     stopFeed()
+    voiceLogStage("STATE", "post working=false (turn-complete)")
     void postUpdate({ event: "working", working: false })
     return postUpdate({ event: "turn_complete", reply })
   }
@@ -108,8 +109,8 @@ export function createVoice(options: VoiceOptions) {
 
   // ----- streamed TTS playback (mechanical; mic muted while speaking) --
 
-  // The sidecar streams PCM frames: audio.start → audio.delta* → audio.end. We schedule
-  // them gaplessly and mute the mic for the duration so the STT never hears the output.
+  // The sidecar streams PCM frames: audio.start → audio.delta* → audio.end. TUI pipes them
+  // to ffplay as they arrive; web schedules them on Web Audio. Mic is muted while speaking.
   const startAudio = (sampleRate: number, trigger?: string) => {
     audioGeneration++
     sink?.stop()
@@ -189,6 +190,7 @@ export function createVoice(options: VoiceOptions) {
   }
 
   const handleAction = (event: Extract<VoiceSidecarEvent, { type: "action" }>) => {
+    if (event.turnId !== undefined) setVoiceLogContext({ turnId: event.turnId })
     if (event.action === "trace") {
       voiceLogStage("HARNESS", event.text ?? "")
       return
@@ -232,6 +234,7 @@ export function createVoice(options: VoiceOptions) {
     if (!event) return
     if (event.type === "ready") {
       voiceID = event.voiceID
+      setVoiceLogContext({ voiceId: voiceID })
       setDisplayPhase("listening")
       return
     }
@@ -260,13 +263,9 @@ export function createVoice(options: VoiceOptions) {
     if (event.type === "transcript") {
       if (event.text.trim() && !event.speechFinal) {
         voiceLogStage("STATE", `transcript-partial "${event.text.slice(0, 40)}"`)
-        if (!ttsActive && !options.working()) {
-          setHearing("")
-          setDisplayPhase("hearing")
-          options.onTranscript?.(event.text)
-          return
-        }
         setHearing(event.text)
+        setDisplayPhase("hearing")
+        if (!ttsActive && !options.working()) options.onTranscript?.(event.text)
         return
       }
       if (event.speechFinal) {
@@ -276,6 +275,9 @@ export function createVoice(options: VoiceOptions) {
       return
     }
     if (event.type === "status") {
+      if (event.state === "idle" && event.reason === "no speech") {
+        voiceLogStage("STATE", "no speech detected")
+      }
       if (event.state === "working") setDisplayPhase("working")
       else if (event.state === "listening" && !ttsActive && !options.working()) {
         setDisplayPhase(hearing().trim() ? "hearing" : "listening")
@@ -298,7 +300,6 @@ export function createVoice(options: VoiceOptions) {
       agent: params.agent,
       server: params.server,
       composer: transport === "browser",
-      terminalMic: transport === "terminal",
     })
 
   const stream = createVoiceStreamTransport({
@@ -333,6 +334,7 @@ export function createVoice(options: VoiceOptions) {
     ttsActive = false
     stopFeed()
     voiceID = ""
+    clearVoiceLogContext(["voiceId", "turnId"])
     setHearing("")
     stream.close()
     stream.setConnectParams(undefined)
@@ -354,15 +356,14 @@ export function createVoice(options: VoiceOptions) {
     running = true
     setActive(true)
     setVoiceOutput("listenActive", true)
-    voiceLogStage("STATE", `start session=${sessionID} sidecar=${sidecarUrl}`)
+    setVoiceLogContext({ sessionId: sessionID })
+    voiceLogStage("STATE", `start session=${sessionID} voice=${sidecarUrl}`)
     setDisplayPhase("listening")
 
+    stream.setConnectParams(params)
     const session = await createSession(params)
-    if (transport === "browser") {
-      stream.setConnectParams(params)
-      await stream.startBrowserMic()
-    }
-    await stream.attach(session.stream)
+    await stream.attach(voiceStreamUrl(sidecarUrl, session.id))
+    await stream.startMic()
   }
 
   const toggle = () => {

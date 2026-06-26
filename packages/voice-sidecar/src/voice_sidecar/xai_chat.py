@@ -16,7 +16,7 @@ class ChatError(Exception):
 
 
 def chat_model() -> str:
-    return os.environ.get("VOICE_LLM_MODEL", "grok-3-mini")
+    return os.environ.get("VOICE_LLM_MODEL", "grok-4.20-0309-non-reasoning")
 
 
 def chat_complete(

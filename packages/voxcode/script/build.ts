@@ -8,7 +8,6 @@ import { fileURLToPath } from "url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dir = path.resolve(__dirname, "..")
 const repoRoot = path.resolve(dir, "../..")
-const sidecarSrc = path.join(repoRoot, "packages", "voice-sidecar")
 
 const skipOpencode = process.argv.includes("--skip-opencode")
 
@@ -59,12 +58,6 @@ for (const item of targets) {
     },
   })
 
-  const bundleDir = path.join(dir, "dist", name, "voice-sidecar")
-  await $`rm -rf ${bundleDir}`
-  await $`mkdir -p ${bundleDir}`
-  await $`cp ${sidecarSrc}/pyproject.toml ${sidecarSrc}/README.md ${bundleDir}/`
-  await $`cp -R ${sidecarSrc}/src ${bundleDir}/`
-
   const opencodeName = ["opencode", item.os === "win32" ? "windows" : item.os, item.arch].filter(Boolean).join("-")
   const opencodeBinary = path.join(opencodeDir, "dist", opencodeName, "bin", item.os === "win32" ? "opencode.exe" : "opencode")
   if (!skipOpencode && !fs.existsSync(opencodeBinary)) {
@@ -85,6 +78,15 @@ for (const item of targets) {
     if (!help.includes("voxcode")) {
       console.error("smoke test failed")
       process.exit(1)
+    }
+
+    if (fs.existsSync(opencodeBinary)) {
+      console.log(`smoke test: ${opencodeBinary} --version`)
+      const opencodeVersion = await $`${opencodeBinary} --version`.text()
+      if (!opencodeVersion.trim()) {
+        console.error("opencode smoke test failed")
+        process.exit(1)
+      }
     }
   }
 

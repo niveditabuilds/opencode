@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
 
-import { dirname } from "node:path"
 import { runOpencode } from "./opencode"
-import { startSidecar, watchSidecar } from "./sidecar"
 import { requireXaiApiKey, xaiApiKeyStatus } from "./xai"
 
 const HELP = `voxcode — Vox Code with voice (local)
@@ -15,10 +13,9 @@ Usage:
 
 Environment:
   XAI_API_KEY          required for voice (https://console.x.ai)
-  VOXCODE_VOICE_PORT   voice sidecar port (default 8765)
   VOXCODE_OPENCODE_BIN path to opencode binary (optional)
-  VOXCODE_SIDECAR_ROOT path to packages/voice-sidecar (optional)
-  VOXCODE_PYTHON       python executable (default python3)
+  VOICE_SIDECAR_URL    override voice server URL (default: opencode server URL)
+  OPENCODE_SERVER_URL  opencode server URL when not using the local daemon
 `
 
 const OPENCODE_COMMANDS = new Set([
@@ -78,30 +75,13 @@ async function main() {
     requireXaiApiKey()
   }
 
-  const exeDir = dirname(process.execPath)
-  let sidecar: Awaited<ReturnType<typeof startSidecar>>["child"]
-  if (xai.ok) {
-    sidecar = (await startSidecar(exeDir)).child
-  } else {
-    sidecar = undefined
+  if (!xai.ok) {
     process.stderr.write(`voxcode: voice disabled — ${xai.reason}\n`)
-    process.stderr.write("voxcode: starting without voice sidecar. Export XAI_API_KEY, then use /voice in the TUI.\n")
+    process.stderr.write("voxcode: export XAI_API_KEY, then use /voice in the TUI.\n")
   }
 
-  let stopping = false
-  watchSidecar(sidecar, () => {
-    if (stopping) return
-    stopping = true
-    process.stderr.write("voxcode: voice sidecar stopped\n")
-    process.exit(1)
-  })
-
   const opencodeArgs = parsed.mode === "web" ? ["web", ...parsed.opencodeArgs] : parsed.opencodeArgs
-  const code = await runOpencode(process.execPath, opencodeArgs)
-
-  stopping = true
-  sidecar?.kill()
-  process.exit(code)
+  process.exit(await runOpencode(process.execPath, opencodeArgs))
 }
 
 main().catch((error) => {

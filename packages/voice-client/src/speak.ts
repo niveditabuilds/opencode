@@ -1,4 +1,4 @@
-/** TTS output — sidecar HTTP + local playback. Not coupled to STT or WSS session. */
+/** TTS output — voice-server HTTP + local playback. Not coupled to STT or WSS session. */
 
 import { fetchVoiceFinalSpeak, fetchVoiceSpeak, type VoiceFinalSpeakPlan } from "./api"
 import { voiceLogStage } from "#log"

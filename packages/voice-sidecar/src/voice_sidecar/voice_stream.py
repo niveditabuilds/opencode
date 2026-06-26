@@ -1,10 +1,11 @@
-"""WSS voice stream — browser or terminal audio in, STT + opencode + TTS events out."""
+"""WSS voice stream — client PCM in, STT + harness actions out."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
 import json
+import os
 import sys
 from typing import AsyncIterator, Callable
 
@@ -13,19 +14,22 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from .harness_runtime import emit_harness_actions, outbox_harness_loop, periodic_harness_loop
 from .speaker import Speaker
 from . import harness_store
-from .opencode import OpencodeClient, OpencodeError
 from .sessions import VoiceSession
 from .speech_summary import speak_text
 from .stt import STTError
-from .stream import XaiStreamingSTT, mic_frames
-from .tts import TTSError, default_tts
+from .stream import XaiStreamingSTT
+from .tts import TTSError
+
+from .voice_log import set_log_context, write_log
 
 # Re-export for server imports that still reference this module.
 _speak_text = speak_text
 
 
 def _log(msg: str) -> None:
-    print(f"voice-sidecar: {msg}", file=sys.stderr, flush=True)
+    write_log("STATE", msg)
+    if os.environ.get("VOXCODE_SIDECAR_LOGS") == "1":
+        print(f"voice-sidecar: {msg}", file=sys.stderr, flush=True)
 
 
 async def _send_json(websocket: WebSocket, payload: dict) -> None:
@@ -46,47 +50,6 @@ async def _drain_websocket(websocket: WebSocket, seconds: float = 0.3) -> None:
             continue
         if message["type"] == "websocket.disconnect":
             return
-
-
-async def _poll_websocket_control(
-    websocket: WebSocket,
-    stop: asyncio.Event,
-    on_speak: Callable[[str, bool], None] | None = None,
-    accept_mic: asyncio.Event | None = None,
-) -> None:
-    while not stop.is_set():
-        if websocket.client_state != WebSocketState.CONNECTED:
-            return
-        try:
-            message = await asyncio.wait_for(websocket.receive(), timeout=0.2)
-        except asyncio.TimeoutError:
-            continue
-        if message["type"] == "websocket.disconnect":
-            stop.set()
-            return
-        text = message.get("text")
-        if not text:
-            continue
-        try:
-            event = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if event.get("type") == "audio.done":
-            stop.set()
-            return
-        if event.get("type") == "mic" and accept_mic is not None:
-            enabled = event.get("enabled")
-            if enabled is True:
-                accept_mic.set()
-                _log("terminal mic enabled")
-            elif enabled is False:
-                accept_mic.clear()
-                _log("terminal mic disabled")
-            continue
-        if event.get("type") == "speak" and on_speak is not None:
-            reply = str(event.get("text") or "")
-            if reply.strip():
-                on_speak(reply, bool(event.get("raw")))
 
 
 async def _websocket_frames(
@@ -273,45 +236,22 @@ async def _listen_once(
     return None
 
 
-async def _listen_once_terminal(
-    websocket: WebSocket,
-    stt: XaiStreamingSTT,
-    accept_mic: asyncio.Event | None = None,
-) -> str | None:
-    for attempt in range(3):
-        if attempt:
-            await asyncio.sleep(0.5 * attempt)
-            await _send_json(websocket, {"type": "status", "state": "listening", "retry": attempt + 1})
-        stop = asyncio.Event()
-
-        async def frames() -> AsyncIterator[bytes]:
-            async for chunk in mic_frames(stt.sample_rate, None, stop):
-                if accept_mic is not None and not accept_mic.is_set():
-                    continue
-                yield chunk
-
-        try:
-            text = await _listen_from_frames(websocket, stt, stop, frames())
-        except STTError:
-            stop.set()
-            if attempt < 2:
-                continue
-            raise
-        finally:
-            stop.set()
-        if text:
-            return text
-    return None
-
-
 async def run_voice_stream(websocket: WebSocket, voice: VoiceSession) -> None:
-    """Stream mic audio to STT, route each utterance through the harness, emit its actions.
+    """Stream client mic PCM to STT, route each utterance through the harness, emit actions.
 
-    Every session — browser composer or terminal — is harness-driven. The client owns turn
-    execution and TTS playback; the sidecar is STT + the LLM brain. The only difference here
-    is the mic source (browser WSS PCM vs terminal PortAudio) and terminal mic control.
+    The client owns mic capture, turn execution, and playback. The sidecar is STT plus the
+    harness brain that steers opencode.
     """
     stt = XaiStreamingSTT()
+    transport = "web" if voice.composer else "tui"
+    set_log_context(voice.id, voiceId=voice.id, sessionId=voice.opencode_session_id, transport=transport)
+    write_log(
+        "STATE",
+        f"voice stream started transport={transport}",
+        voice_id=voice.id,
+        session_id=voice.opencode_session_id,
+        transport=transport,
+    )
 
     await _send_json(
         websocket,
@@ -320,21 +260,12 @@ async def run_voice_stream(websocket: WebSocket, voice: VoiceSession) -> None:
             "voiceID": voice.id,
             "opencodeSessionID": voice.opencode_session_id,
             "sampleRate": stt.sample_rate,
-            "encoding": "pcm16" if not voice.terminal_mic else "terminal",
+            "encoding": "pcm16",
         },
     )
 
     accept_audio = asyncio.Event()
     accept_audio.set()
-    accept_mic = asyncio.Event()
-    if voice.terminal_mic:
-        accept_mic.set()
-
-    listen = (
-        (lambda: _listen_once_terminal(websocket, stt, accept_mic))
-        if voice.terminal_mic
-        else (lambda: _listen_once(websocket, stt, accept_audio))
-    )
 
     session_stop = asyncio.Event()
     harness_store.get_or_create(voice.id)
@@ -342,43 +273,40 @@ async def run_voice_stream(websocket: WebSocket, voice: VoiceSession) -> None:
     harness_store.bind_outbox(voice.id, asyncio.get_running_loop(), outbox)
     speaker = Speaker(websocket)
 
-    control_task: asyncio.Task[None] | None = None
-    if voice.terminal_mic:
-        control_task = asyncio.create_task(
-            _poll_websocket_control(websocket, session_stop, None, accept_mic),
-        )
     periodic_task = asyncio.create_task(periodic_harness_loop(websocket, voice.id, session_stop, speaker))
-    outbox_task = asyncio.create_task(outbox_harness_loop(websocket, outbox, session_stop, speaker))
+    outbox_task = asyncio.create_task(
+        outbox_harness_loop(websocket, outbox, session_stop, speaker, voice_id=voice.id),
+    )
 
     try:
         while websocket.client_state == WebSocketState.CONNECTED:
             await _send_json(websocket, {"type": "status", "state": "listening"})
             try:
-                text = await listen()
+                text = await _listen_once(websocket, stt, accept_audio)
             except STTError as exc:
+                write_log("STATE", f"stt error: {exc}", voice_id=voice.id)
                 await _send_json(websocket, {"type": "error", "message": str(exc)})
                 continue
             if not text:
-                if not voice.terminal_mic:
-                    await _drain_websocket(websocket, seconds=0.15)
+                await _drain_websocket(websocket, seconds=0.15)
                 await _send_json(websocket, {"type": "status", "state": "idle", "reason": "no speech"})
                 continue
 
-            if not voice.terminal_mic:
-                await _drain_websocket(websocket, seconds=0.15)
-                accept_audio.clear()
+            await _drain_websocket(websocket, seconds=0.15)
+            accept_audio.clear()
+            write_log("STATE", f"utterance final chars={len(text)}", voice_id=voice.id)
             await _send_json(websocket, {"type": "status", "state": "transcribing", "text": text})
             harness = harness_store.get_or_create(voice.id)
             actions = await asyncio.to_thread(harness.route_utterance, text)
-            await emit_harness_actions(websocket, actions, speaker)
+            await emit_harness_actions(websocket, actions, speaker, voice_id=voice.id)
+            accept_audio.set()
             await _send_json(websocket, {"type": "status", "state": "listening"})
     finally:
         session_stop.set()
         harness_store.unbind_outbox(voice.id)
-        for task in (control_task, periodic_task, outbox_task):
-            if task is not None:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+        for task in (periodic_task, outbox_task):
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def handle_voice_stream(websocket: WebSocket, voice: VoiceSession) -> None:

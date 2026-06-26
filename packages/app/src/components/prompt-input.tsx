@@ -69,7 +69,6 @@ import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { createVoiceComposerState, voiceComposerBorderClass, voiceSidecarBaseUrl } from "./prompt-input/voice"
-import { VoiceDebugPanel } from "./prompt-input/voice-debug"
 import { buildVoiceProgressSnapshot, collectActiveTurnParts } from "@opencode-ai/voice-client/progress"
 import { PromptVoiceComposer } from "./prompt-input/voice-composer"
 import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
@@ -1677,15 +1676,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
   return (
     <div class="relative size-full flex flex-col gap-0">
-      <VoiceDebugPanel
-        display={voice.display}
-        active={voice.active}
-        awaitingSpeak={voice.awaitingSpeak}
-        working={working}
-        sidecarUrl={voiceSidecarBaseUrl}
-        logLines={voice.voiceLogLines}
-        lastAction={voice.lastTtsAction}
-      />
       {(promptReady(), null)}
       <PromptPopover
         popover={store.popover}

@@ -13,25 +13,6 @@ export function findRepoRoot(start: string) {
   }
 }
 
-export function findSidecarRoot(exeDir: string) {
-  const explicit = process.env.VOXCODE_SIDECAR_ROOT
-  if (explicit && existsSync(join(explicit, "pyproject.toml"))) return explicit
-
-  for (const bundled of [join(exeDir, "voice-sidecar"), join(dirname(exeDir), "voice-sidecar")]) {
-    if (existsSync(join(bundled, "pyproject.toml"))) return bundled
-  }
-
-  const repo = findRepoRoot(exeDir) ?? findRepoRoot(process.cwd())
-  if (repo) {
-    const dev = join(repo, "packages", "voice-sidecar")
-    if (existsSync(join(dev, "pyproject.toml"))) return dev
-  }
-
-  throw new Error(
-    "voice sidecar not found.\nSet VOXCODE_SIDECAR_ROOT to packages/voice-sidecar or reinstall voxcode.",
-  )
-}
-
 export type OpencodeLaunch =
   | { kind: "binary"; path: string }
   | { kind: "bun"; entry: string }

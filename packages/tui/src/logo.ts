@@ -1,8 +1,9 @@
-export const logo = {
-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
-  right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
+export type LogoShape = {
+  left: string[]
+  right: string[]
 }
 
+/** Small mark for background pulse shimmer (not product branding). */
 export const go = {
   left: ["    ", "█▀▀▀", "█_^█", "▀▀▀▀"],
   right: ["    ", "█▀▀█", "█__█", "▀▀▀▀"],

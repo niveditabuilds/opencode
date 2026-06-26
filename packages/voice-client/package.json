@@ -43,6 +43,10 @@
     "#sidecar-url": {
       "browser": "./src/sidecar-url.browser.ts",
       "default": "./src/sidecar-url.node.ts"
+    },
+    "#mic": {
+      "browser": "./src/mic.browser.ts",
+      "default": "./src/mic.node.ts"
     }
   },
   "dependencies": {

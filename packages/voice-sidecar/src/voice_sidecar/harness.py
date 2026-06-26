@@ -125,33 +125,38 @@ class VoiceHarness:
     last_submitted: str = ""
     progress: dict[str, object] = field(default_factory=dict)
     last_periodic_at: float = 0.0
+    turn_id: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # ----- update ingest -------------------------------------------------
 
-    def push_update(self, payload: dict[str, object]) -> None:
+    def push_update(self, payload: dict[str, object]) -> list[dict[str, object]]:
         with self._lock:
-            self._push_update_locked(payload)
+            return self._push_update_locked(payload)
 
-    def _push_update_locked(self, payload: dict[str, object]) -> None:
+    def _push_update_locked(self, payload: dict[str, object]) -> list[dict[str, object]]:
         event = str(payload.get("event") or payload.get("kind") or "update").strip().lower()
         if event == "working":
+            was = self.working
             self.working = bool(payload.get("working"))
             if self.working:
                 self.phase = "working"
             elif self.phase == "working":
                 self.phase = "listening"
-            return
+            if self.working != was:
+                return [{"action": "trace", "text": f"working={self.working} phase={self.phase} (update)"}]
+            return []
         if event == "progress":
             self.progress = _coerce_progress(payload)
             self.buffer.append(
                 BufferEntry(kind="progress", text=json.dumps(self.progress, sort_keys=True), at=time.time())
             )
-            return
+            return []
         text = str(payload.get("text") or payload.get("detail") or payload.get("reply") or "").strip()
         if not text:
-            return
+            return []
         self.buffer.append(BufferEntry(kind=event, text=text, at=time.time()))
+        return []
 
     # ----- triggers ------------------------------------------------------
 
@@ -250,6 +255,8 @@ class VoiceHarness:
                 actions.insert(1, {"action": "speak", "text": speak, "trigger": "status"})
             return actions
         if action in {"submit_turn", "redirect"}:
+            self.turn_id += 1
+            turn = self.turn_id
             self.working = True
             self.phase = "working"
             self.last_submitted = text
@@ -257,7 +264,7 @@ class VoiceHarness:
             if action == "redirect":
                 actions.append({"action": "interrupt"})
             actions += [
-                {"action": "submit_turn", "text": text},
+                {"action": "submit_turn", "text": text, "turnId": turn},
                 {"action": "expect_reply"},
                 {"action": "set_phase", "phase": "working"},
             ]

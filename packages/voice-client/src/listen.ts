@@ -1,13 +1,13 @@
-import { downsampleTo16k } from "./audio"
+import { createMicCapture, type MicCapture } from "#mic"
 import { parseVoiceSidecarEvent } from "./sidecar"
-import { SILENT_WAV } from "./types"
+import { voiceStreamUrl } from "./url"
 
 export type VoiceStreamTransport = {
   attach: (stream: string) => Promise<void>
   close: () => void
   setMicEnabled: (enabled: boolean) => void
-  stopBrowserMic: () => void
-  startBrowserMic: () => Promise<void>
+  stopMic: () => void
+  startMic: () => Promise<void>
   ensureConnected: () => Promise<boolean>
   setConnectParams: (params: ConnectParams | undefined) => void
   isOpen: () => boolean
@@ -28,83 +28,50 @@ export function createVoiceStreamTransport(input: {
   onOpen: () => void
   onTerminalClose: () => void
   isRunning: () => boolean
-  createSession: (params: ConnectParams) => Promise<{ stream: string }>
+  createSession: (params: ConnectParams) => Promise<{ id: string; stream: string }>
 }): VoiceStreamTransport {
   let ws: WebSocket | undefined
-  let sendAudio = false
   let reconnecting = false
-  let audioContext: AudioContext | undefined
-  let processor: ScriptProcessorNode | undefined
-  let source: MediaStreamAudioSourceNode | undefined
-  let mediaStream: MediaStream | undefined
-  let unlockAudio: HTMLAudioElement | undefined
+  let mic: MicCapture | undefined
   let connectParams: ConnectParams | undefined
 
   const isOpen = () => ws?.readyState === WebSocket.OPEN
 
+  const sendPcm = (buffer: ArrayBuffer) => {
+    if (!input.isRunning() || !ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(buffer)
+  }
+
   const setMicEnabled = (enabled: boolean) => {
-    if (input.transport === "browser") {
-      sendAudio = enabled && input.isRunning()
-      return
-    }
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "mic", enabled }))
+    mic?.setEnabled(enabled && input.isRunning())
   }
 
-  const stopBrowserMic = () => {
-    sendAudio = false
-    processor?.disconnect()
-    source?.disconnect()
-    if (audioContext) void audioContext.close()
-    mediaStream?.getTracks().forEach((track) => track.stop())
-    processor = undefined
-    source = undefined
-    audioContext = undefined
-    mediaStream = undefined
-    unlockAudio = undefined
+  const stopMic = () => {
+    mic?.stop()
+    mic = undefined
   }
 
-  const startBrowserMic = async () => {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
+  const startMic = async () => {
+    stopMic()
+    mic = createMicCapture({
+      sendPcm,
+      isRunning: input.isRunning,
+      onError: input.onError,
     })
-    audioContext = new AudioContext()
-    if (audioContext.state === "suspended") await audioContext.resume()
-    unlockAudio = new Audio()
-    unlockAudio.setAttribute("playsinline", "true")
-    unlockAudio.src = SILENT_WAV
-    try {
-      await unlockAudio.play()
-      unlockAudio.pause()
-      unlockAudio.removeAttribute("src")
-    } catch {
-      // Browser may still allow later playback after further interaction.
-    }
-    source = audioContext.createMediaStreamSource(mediaStream)
-    processor = audioContext.createScriptProcessor(4096, 1, 1)
-    processor.onaudioprocess = (event) => {
-      if (!input.isRunning() || !sendAudio || !ws || ws.readyState !== WebSocket.OPEN) return
-      const pcm = downsampleTo16k(event.inputBuffer.getChannelData(0), audioContext!.sampleRate)
-      ws.send(pcm.buffer)
-    }
-    source.connect(processor)
-    const silent = audioContext.createGain()
-    silent.gain.value = 0
-    processor.connect(silent)
-    silent.connect(audioContext.destination)
-    sendAudio = true
+    await mic.start()
+    mic.setEnabled(true)
   }
 
   const attach = (stream: string) =>
     new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(stream)
       ws = socket
-      if (input.transport === "browser") socket.binaryType = "arraybuffer"
+      socket.binaryType = "arraybuffer"
       socket.onopen = () => {
         input.onOpen()
         resolve()
       }
-      socket.onerror = () => reject(new Error("voice stream connection failed"))
+      socket.onerror = () => reject(new Error(`voice stream connection failed (${stream})`))
       socket.onmessage = (message) => {
         if (typeof message.data !== "string") return
         input.onEvent(parseVoiceSidecarEvent(message.data))
@@ -123,12 +90,12 @@ export function createVoiceStreamTransport(input: {
             reconnecting = false
             if (ok) return
             input.onError("voice stream closed — toggle voice off and on")
-            stopBrowserMic()
+            stopMic()
           })
           .catch(() => {
             reconnecting = false
             input.onError("voice stream closed — toggle voice off and on")
-            stopBrowserMic()
+            stopMic()
           })
       }
     })
@@ -142,7 +109,7 @@ export function createVoiceStreamTransport(input: {
     }
     try {
       const session = await input.createSession(connectParams)
-      await attach(session.stream)
+      await attach(voiceStreamUrl(connectParams.sidecarUrl, session.id))
       return ws?.readyState === WebSocket.OPEN
     } catch {
       return false
@@ -150,11 +117,8 @@ export function createVoiceStreamTransport(input: {
   }
 
   const close = () => {
-    if (input.transport === "browser") stopBrowserMic()
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      if (input.transport === "terminal") setMicEnabled(false)
-      ws.close()
-    }
+    stopMic()
+    if (ws && ws.readyState === WebSocket.OPEN) ws.close()
     ws = undefined
   }
 
@@ -162,8 +126,8 @@ export function createVoiceStreamTransport(input: {
     attach,
     close,
     setMicEnabled,
-    stopBrowserMic,
-    startBrowserMic,
+    stopMic,
+    startMic,
     ensureConnected,
     setConnectParams: (params) => {
       connectParams = params

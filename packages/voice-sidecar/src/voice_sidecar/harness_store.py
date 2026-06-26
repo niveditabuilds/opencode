@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass, field
 
 from .harness import VoiceHarness
+from .voice_log import set_log_context, write_log
 
 
 @dataclass
@@ -75,6 +76,9 @@ def _emit(voice_id: str, actions: list[dict[str, object]]) -> None:
         entry = _entries.get(voice_id)
         loop = entry.loop if entry else None
         outbox = entry.outbox if entry else None
+        harness = entry.harness if entry else None
+    if harness is not None:
+        set_log_context(voice_id, voiceId=voice_id, turnId=harness.turn_id)
     if not loop or not outbox or not actions:
         return
     for action in actions:
@@ -84,10 +88,15 @@ def _emit(voice_id: str, actions: list[dict[str, object]]) -> None:
 def apply_update(voice_id: str, payload: dict[str, object]) -> list[dict[str, object]]:
     harness = get_or_create(voice_id)
     event = str(payload.get("event") or "").strip().lower()
+    set_log_context(voice_id, voiceId=voice_id, turnId=harness.turn_id)
     if event == "turn_complete":
-        actions = harness.note_turn_complete(str(payload.get("reply") or payload.get("text") or ""))
+        reply = str(payload.get("reply") or payload.get("text") or "")
+        write_log("HARNESS", f"turn_complete received chars={len(reply.strip())}", voice_id=voice_id)
+        actions = harness.note_turn_complete(reply)
+        speak = any(str(item.get("action") or "") == "speak" for item in actions)
+        write_log("HARNESS", f"turn_complete actions={len(actions)} speak={speak}", voice_id=voice_id)
     else:
-        harness.push_update(payload)
-        actions = []
+        write_log("STATE", f"harness update event={event or 'update'}", voice_id=voice_id)
+        actions = harness.push_update(payload)
     _emit(voice_id, actions)
     return actions

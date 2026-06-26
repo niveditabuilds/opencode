@@ -2,12 +2,7 @@ import { BoxRenderable, MouseButton, MouseEvent, RGBA, TextAttributes } from "@o
 import { useRenderer } from "@opentui/solid"
 import { For, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { useTheme, tint } from "../context/theme"
-import { go, logo } from "../logo"
-
-export type LogoShape = {
-  left: string[]
-  right: string[]
-}
+import { go, type LogoShape } from "../logo"
 
 type ShimmerConfig = {
   period: number
@@ -302,7 +297,6 @@ function build(shape: LogoShape): LogoContext {
   return { LEFT, FULL, SPAN, MAP: mapGlyphs(FULL), shape }
 }
 
-const DEFAULT = build(logo)
 const GO = build(go)
 
 function shimmer(x: number, y: number, frame: Frame, ctx: LogoContext) {
@@ -552,7 +546,7 @@ function buildIdleState(t: number, ctx: LogoContext): IdleState {
 }
 
 export function Logo(props: { shape?: LogoShape; ink?: RGBA; idle?: boolean } = {}) {
-  const ctx = props.shape ? build(props.shape) : DEFAULT
+  const ctx = props.shape ? build(props.shape) : GO
   const { theme } = useTheme()
   const renderer = useRenderer()
   const [rings, setRings] = createSignal<Ring[]>([])

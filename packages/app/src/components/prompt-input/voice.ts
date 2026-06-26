@@ -4,7 +4,7 @@ import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@openco
 import { createVoice, type VoicePhase } from "@opencode-ai/voice-client/runtime"
 import type { VoiceProgressSnapshot } from "@opencode-ai/voice-client/api"
 import type { VoicePermissionReply } from "@opencode-ai/voice-client/panel"
-import { initVoiceLog, setVoiceLogEnabled, voiceLogLines } from "@opencode-ai/voice-client/log"
+import { initVoiceLog, setVoiceLogContext, setVoiceLogEnabled } from "@opencode-ai/voice-client/log"
 import { speakAssistantReply } from "@opencode-ai/voice-client/speak"
 import { armVoiceReply, noteVoiceAction, voiceOutput } from "@opencode-ai/voice-client/store"
 import { hostedVoiceSidecarUrl } from "@/utils/hosted-url"
@@ -75,6 +75,7 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
       sidecarUrl: options.connect?.sidecarUrl ?? voiceSidecarBaseUrl,
       active: () => voiceOutput.listenActive || voiceOutput.awaitingReply,
     })
+    setVoiceLogContext({ transport: "web" })
     setVoiceLogEnabled(true)
   }
 
@@ -183,11 +184,9 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
     store,
     display,
     statusHeader,
-    voiceLogLines: () => voiceLogLines(),
     active,
     awaitingSpeak: () => voiceOutput.awaitingReply,
     toggle,
-    lastTtsAction: () => voiceOutput.lastAction,
     dismissDisclosure: () => {
       if (typeof localStorage !== "undefined") localStorage.setItem("opencode.voice.disclosure", "1")
       setStore({ showDisclosure: false, disclosureDismissed: true })

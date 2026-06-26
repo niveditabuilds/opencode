@@ -24,8 +24,8 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-> macOS: the first mic use will prompt for microphone permission for your
-> terminal. If `sounddevice` fails to load PortAudio, run `brew install portaudio`.
+> macOS TUI voice: the client captures mic via `ffmpeg` — install with `brew install ffmpeg`.
+> The sidecar itself does not capture microphone input.
 
 ### Configure
 
@@ -34,6 +34,8 @@ export XAI_API_KEY="xai-…"   # real key from https://console.x.ai — not a pl
 # optional STT overrides:
 # export XAI_BASE_URL="https://api.x.ai/v1"
 # export VOICE_STT_LANGUAGE="en"
+# harness router + TTS rewrite (default grok-4.20-0309-non-reasoning):
+# export VOICE_LLM_MODEL="grok-4.3"
 
 # Phase 1 — opencode server (auto-discovered if omitted):
 # export OPENCODE_SERVER_URL="http://127.0.0.1:4096"
@@ -50,55 +52,30 @@ writes when you run `opencode serve` or open the app.
 
 ---
 
-## Phase 0 — local STT binary
+## CLI helpers
 
-**Live (streaming) transcription** from the microphone, plus a batch file mode for
-debugging. STT providers sit behind swappable interfaces — streaming in
-`voice_sidecar/stream.py`, batch in `voice_sidecar/stt.py`; xAI is the first provider.
-
-`listen` streams mic audio to xAI's WebSocket STT (`wss://api.x.ai/v1/stt`) and shows
-results as they arrive:
-
-- **interim** partials (`·`) update live as you speak,
-- **chunk-final** locked text (`▸`) once a span settles,
-- a **final utterance** is committed to **stdout** when you stop speaking
-  (`speech_final` — this is the unit later phases hand to the decider).
+Batch transcription for debugging (no mic):
 
 ```sh
-# Live transcription. Speak; interim text updates in place; each finished
-# utterance is printed as a line. Ctrl-C to stop.
-voice-stt listen
-
-# Stop automatically after the first complete utterance.
-voice-stt listen --once
-
-# Transcribe an existing wav file in one shot (batch; no mic needed).
 voice-stt transcribe /tmp/clip.wav
-
-# List input devices, then target one.
-voice-stt devices
-voice-stt listen --device 1
 ```
 
-Final utterances are printed to **stdout**; live/interim text and status go to
-**stderr**, so you can capture just the committed transcript:
+Text smoke test against opencode:
 
 ```sh
-voice-stt listen 2>/dev/null
+voice-stt ask "list the files in src"
 ```
-
-Mic options: `--language` (e.g. `en`), `--sample-rate` (default 16000), `--device`.
 
 ### Dev runner (opencode + sidecar together)
 
-`run-voice-dev.sh` starts opencode from source and the voice sidecar, logging
+`run-voice-dev.sh` starts opencode from source and the voice sidecar HTTP service, logging
 everything to `.voice-dev/voice-dev.log` for debugging and agent inspection.
 
 ```sh
 cd packages/voice-sidecar
 export XAI_API_KEY="xai-…"   # from https://console.x.ai
 
-./run-voice-dev.sh start      # opencode serve + voice-stt converse
+./run-voice-dev.sh start      # opencode serve + voice-stt serve
 ./run-voice-dev.sh status
 ./run-voice-dev.sh logs       # last 80 lines
 ./run-voice-dev.sh logs 200
@@ -108,7 +85,7 @@ export XAI_API_KEY="xai-…"   # from https://console.x.ai
 ```
 
 Env overrides: `OPENCODE_PORT` (default 4096), `OPENCODE_WORKSPACE` (default repo
-root), `VOICE_MODE=ask` for a one-shot text test instead of `converse`.
+root), `VOICE_MODE=ask` for a one-shot text test instead of `serve`.
 
 Requires `bun install` at repo root and a sidecar venv (`pip install -e .`).
 
@@ -179,17 +156,6 @@ export XAI_API_KEY="xai-…"   # from https://console.x.ai
 
 # Text smoke test — no mic
 voice-stt ask "list the files in src"
-
-# Voice loop — speak, wait for reply, repeat (Ctrl-C to quit)
-export OPENCODE_DIRECTORY="/path/to/your/repo"
-export OPENCODE_AGENT="build"
-export OPENCODE_MODEL_PROVIDER="opencode"
-export OPENCODE_MODEL_ID="big-pickle"
-export XAI_API_KEY="xai-…"   # from https://console.x.ai
-voice-stt converse --server http://127.0.0.1:4096
-
-# Single utterance smoke test (no loop)
-voice-stt converse --once --server http://127.0.0.1:4096
 ```
 
 If you used bare `serve` on port 4096 (no `server.json`), pass the URL explicitly:
@@ -200,6 +166,9 @@ voice-stt ask --server http://127.0.0.1:4096 "list the files in src"
 
 Reply text goes to **stdout**; session id and progress go to **stderr**.
 
+Voice sessions use the HTTP service (`voice-stt serve`) with client-side mic capture
+(TUI via ffmpeg, web via browser APIs).
+
 ### Session options
 
 ```sh
@@ -207,17 +176,15 @@ Reply text goes to **stdout**; session id and progress go to **stderr**.
 voice-stt ask --session ses_abc123 "what changed?"
 
 # Pick an agent when creating a new session
-voice-stt converse --agent build
+voice-stt ask --agent build
 
 # Point at a specific server
 voice-stt ask --server http://127.0.0.1:4096 "run the tests"
 ```
 
-Shared flags: `--server`, `--session`, `--agent`. `converse` also accepts the
-mic flags from Phase 0.
+Shared flags: `--server`, `--session`, `--agent`.
 
 **Done when:** *"list the files in src"* → opencode runs it → you see the result.
-**Not yet:** talk-back (TTS), continuous listening, mid-turn decider, sidecar HTTP API for web.
 
 ---
 

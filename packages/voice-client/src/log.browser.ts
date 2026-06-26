@@ -1,9 +1,28 @@
-export type VoiceLogStage = "REPLY" | "TTS" | "API" | "PLAY" | "STATE" | "RUNTIME" | "HARNESS"
+import {
+  buildVoiceLogEntry,
+  formatVoiceLogLine,
+  type VoiceLogEntry,
+  type VoiceLogStage,
+} from "./log-core"
+
+export {
+  clearVoiceLogContext,
+  setVoiceLogContext,
+  voiceLogContext,
+  type VoiceLogContext,
+  type VoiceLogEntry,
+  type VoiceLogStage,
+  type VoiceLogTransport,
+} from "./log-core"
+
+export function voiceLogPath() {
+  return "~/.voxcode/logs.jsonl"
+}
 
 const MAX_LINES = 800
 
 const buffer: string[] = []
-let pending: string[] = []
+let pending: VoiceLogEntry[] = []
 let flushScheduled = false
 let sidecarUrl: (() => string) | undefined
 let enabled = true
@@ -15,9 +34,9 @@ function debugEnabled() {
   return localStorage.getItem("opencode.voice.debug") === "1"
 }
 
-function queueFlush(line: string) {
+function queueFlush(entry: VoiceLogEntry) {
   if (!enabled) return
-  pending.push(line)
+  pending.push(entry)
   if (flushScheduled) return
   flushScheduled = true
   queueMicrotask(() => {
@@ -35,11 +54,11 @@ function warnFlushOnce(message: string) {
 }
 
 async function flushPending() {
-  const lines = pending.splice(0)
-  if (!lines.length) return
+  const entries = pending.splice(0)
+  if (!entries.length) return
   if (!sidecarUrl) {
     warnFlushOnce("sidecar URL not configured — toggle voice off and on after sidecar starts")
-    pending.unshift(...lines)
+    pending.unshift(...entries)
     return
   }
   const base = sidecarUrl().replace(/\/+$/, "")
@@ -51,16 +70,16 @@ async function flushPending() {
         "X-OpenCode-Voice-Log": "web",
       },
       keepalive: true,
-      body: JSON.stringify({ lines }),
+      body: JSON.stringify({ entries }),
     })
     if (!res.ok) {
-      warnFlushOnce(`POST /voice/log failed (${res.status}) — restart sidecar on port 8765`)
-      pending.unshift(...lines)
+      warnFlushOnce(`POST /voice/log failed (${res.status}) — is the opencode server running?`)
+      pending.unshift(...entries)
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "fetch failed"
-    warnFlushOnce(`POST /voice/log error (${message}) — is sidecar running on 8765?`)
-    pending.unshift(...lines)
+    warnFlushOnce(`POST /voice/log error (${message}) — is the opencode server running?`)
+    pending.unshift(...entries)
   }
 }
 
@@ -79,16 +98,23 @@ export function setVoiceLogEnabled(active: boolean) {
   flushWarned = false
 }
 
-export function voiceLogPath() {
-  return "~/.local/state/opencode/voice-web.log"
-}
-
 export function voiceLogLast() {
   return lastLine
 }
 
 export function setVoiceLogListener(fn: ((line: string) => void) | undefined) {
   listener = fn
+}
+
+export function voiceLogEntry(entry: VoiceLogEntry) {
+  if (!enabled) return
+  const line = formatVoiceLogLine(entry)
+  lastLine = line
+  buffer.push(line)
+  if (buffer.length > MAX_LINES) buffer.shift()
+  listener?.(line)
+  if (debugEnabled()) console.debug(`voice ${line}`)
+  queueFlush(entry)
 }
 
 export function voiceLog(message: string) {
@@ -99,15 +125,8 @@ export function voiceLogLines() {
   return [...buffer]
 }
 
-export function voiceLogStage(stage: VoiceLogStage, message: string) {
-  if (!enabled) return
-  const line = `${new Date().toISOString().slice(11, 23)} [${stage}] ${message}`
-  lastLine = line
-  buffer.push(line)
-  if (buffer.length > MAX_LINES) buffer.shift()
-  listener?.(line)
-  if (debugEnabled()) console.debug(`voice ${line}`)
-  queueFlush(line)
+export function voiceLogStage(stage: VoiceLogStage | string, message: string) {
+  voiceLogEntry(buildVoiceLogEntry(stage, message))
 }
 
 export function voiceLogOnce(key: string, message: string) {

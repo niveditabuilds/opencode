@@ -25,10 +25,11 @@ from urllib.parse import urlencode
 import certifi
 import websockets
 
-from .audio import CHANNELS, SAMPLE_RATE
 from .stt import STTError
 
 EventHandler = Callable[[dict], None]
+
+SAMPLE_RATE = 16_000  # 16 kHz mono is the standard input for speech models
 
 
 def _websocket_ssl() -> ssl.SSLContext:
@@ -87,48 +88,6 @@ def _stt_connect_error(exc: websockets.InvalidStatus) -> STTError:
     if detail:
         return STTError(f"xAI STT connection failed (HTTP {response.status_code}): {detail}")
     return STTError(f"WebSocket connection rejected: {exc}")
-
-
-async def mic_frames(
-    sample_rate: int,
-    device: str | int | None,
-    stop: asyncio.Event,
-    block_ms: int = 100,
-) -> AsyncIterator[bytes]:
-    """Yield ~``block_ms`` chunks of raw PCM16 mic audio until ``stop`` is set."""
-    import array
-
-    import sounddevice as sd
-
-    gain = float(os.environ.get("VOICE_MIC_GAIN", "2.0"))
-    loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[bytes] = asyncio.Queue()
-    block = int(sample_rate * block_ms / 1000)
-
-    def callback(indata, _frames, _time, status):  # runs on PortAudio thread
-        if gain == 1.0:
-            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
-            return
-        samples = array.array("h")
-        samples.frombytes(bytes(indata))
-        for index, sample in enumerate(samples):
-            samples[index] = max(-32768, min(32767, int(sample * gain)))
-        loop.call_soon_threadsafe(queue.put_nowait, samples.tobytes())
-
-    with sd.InputStream(
-        samplerate=sample_rate,
-        channels=CHANNELS,
-        dtype="int16",
-        blocksize=block,
-        device=device,
-        callback=callback,
-    ):
-        while not stop.is_set():
-            try:
-                chunk = await asyncio.wait_for(queue.get(), timeout=0.2)
-            except asyncio.TimeoutError:
-                continue
-            yield chunk
 
 
 async def file_frames(path: str, block_ms: int = 100) -> AsyncIterator[bytes]:

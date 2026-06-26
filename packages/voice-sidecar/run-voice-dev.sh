@@ -2,7 +2,7 @@
 # Start/stop opencode (from source) + voice sidecar with unified file logging.
 #
 # Usage:
-#   ./run-voice-dev.sh start          # opencode serve + voice-stt converse
+#   ./run-voice-dev.sh start          # opencode serve + voice-stt serve
 #   ./run-voice-dev.sh stop
 #   ./run-voice-dev.sh restart
 #   ./run-voice-dev.sh status
@@ -14,7 +14,7 @@
 #   XAI_API_KEY              required — export before running (https://console.x.ai)
 #   OPENCODE_PORT            default 4096
 #   OPENCODE_WORKSPACE       default repo root (parent of packages/)
-#   VOICE_MODE               converse (default) | ask
+#   VOICE_MODE               serve (default) | ask
 #   VOICE_ASK_TEXT           text for ask mode (default: "list the files in src")
 #   BUN                      path to bun (default: bun on PATH)
 
@@ -35,7 +35,7 @@ SIDECAR_PID_FILE="$RUN_DIR/sidecar.pid"
 
 PORT="${OPENCODE_PORT:-4096}"
 WORKSPACE="${OPENCODE_WORKSPACE:-$REPO_ROOT}"
-MODE="${VOICE_MODE:-converse}"
+MODE="${VOICE_MODE:-serve}"
 ASK_TEXT="${VOICE_ASK_TEXT:-list the files in src}"
 if [[ -z "${BUN:-}" ]]; then
   if command -v bun >/dev/null 2>&1; then
@@ -168,7 +168,7 @@ start_sidecar() {
   if [[ "$MODE" == "ask" ]]; then
     pid="$(launch_bg sidecar "$VOICE_STT" ask --server "$SERVER_URL" "$ASK_TEXT")"
   else
-    pid="$(launch_bg sidecar "$VOICE_STT" converse --server "$SERVER_URL")"
+    pid="$(launch_bg sidecar "$VOICE_STT" serve --port 8765")"
   fi
   echo "$pid" > "$SIDECAR_PID_FILE"
   runner_log "sidecar pid $(cat "$SIDECAR_PID_FILE")"

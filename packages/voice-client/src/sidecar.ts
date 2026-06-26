@@ -17,7 +17,7 @@ export type VoiceSidecarEvent =
   | { type: "reply"; text: string }
   | { type: "tts"; format: string; encoding: string; data: string }
   | { type: "speak"; skipped?: boolean }
-  | { type: "action"; action: VoiceHarnessAction; text?: string; phase?: string; raw?: boolean; trigger?: string }
+  | { type: "action"; action: VoiceHarnessAction; text?: string; phase?: string; raw?: boolean; trigger?: string; turnId?: number }
   | { type: "audio.start"; trigger?: string; sampleRate?: number; codec?: string }
   | { type: "audio.delta"; data: string }
   | { type: "audio.end" }
@@ -40,7 +40,6 @@ export async function createVoiceSidecarSession(input: {
   sessionID?: string
   agent?: string
   server?: string
-  terminalMic?: boolean
   composer?: boolean
 }): Promise<VoiceSessionInfo> {
   const base = resolveSidecarUrl(input.sidecarUrl)
@@ -52,8 +51,7 @@ export async function createVoiceSidecarSession(input: {
       sessionID: input.sessionID,
       agent: input.agent,
       server: input.server,
-      composer: input.composer ?? !input.terminalMic,
-      terminalMic: input.terminalMic ?? false,
+      composer: input.composer ?? false,
     }),
   })
   const data = await res.json().catch(() => ({}))
