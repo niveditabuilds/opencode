@@ -1,3 +1,5 @@
+import type { VoiceAuth } from "./auth"
+
 export type VoicePhase = "off" | "listening" | "hearing" | "working" | "speaking"
 
 export type TuiVoicePhase = VoicePhase
@@ -10,6 +12,7 @@ export type VoiceOptions = {
   sidecarUrl?: () => string
   opencodeUrl: () => string
   serverUrl?: () => string | undefined
+  voiceAuth?: () => VoiceAuth | undefined
   directory: () => string
   sessionID: () => string | undefined
   agent: () => string | undefined

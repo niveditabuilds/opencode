@@ -30,6 +30,9 @@ export type HarnessUpdate = {
   detail?: string
   reply?: string
   progress?: Record<string, unknown>
+  screen?: unknown
+  items?: unknown
+  current?: unknown
   reads?: unknown
   searches?: unknown
   lists?: unknown
@@ -45,3 +48,17 @@ export type ChatCompleteInput = {
 }
 
 export type ChatComplete = (input: ChatCompleteInput) => Promise<string>
+
+export type ResponseCompleteInput = {
+  system: string
+  user: string
+  maxTokens: number
+  temperature?: number
+  /** Literal TTS from the prior speak action — omitted when continuing via previousResponseId */
+  assistant?: string
+  /** xAI Responses API thread id */
+  previousResponseId?: string
+  onResponseId?: (id: string) => void
+}
+
+export type ResponseComplete = (input: ResponseCompleteInput) => Promise<string>

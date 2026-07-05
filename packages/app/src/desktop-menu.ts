@@ -1,4 +1,4 @@
-import { productName } from "@/voxcode"
+import { productName } from "./voxcode"
 
 export type DesktopMenuPlatform = "macos" | "windows"
 

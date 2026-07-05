@@ -1,4 +1,6 @@
+import { voiceLogStage } from "#log"
 import { createMicCapture, type MicCapture } from "#mic"
+import { voiceStreamUrlWithAuth } from "./auth"
 import { parseVoiceSidecarEvent } from "./sidecar"
 import { voiceStreamUrl } from "./url"
 
@@ -19,6 +21,17 @@ export type ConnectParams = {
   sessionID: string
   agent: string | undefined
   server: string
+  authToken?: string
+}
+
+function logStreamUrl(stream: string) {
+  try {
+    const url = new URL(stream)
+    if (url.searchParams.has("auth_token")) url.searchParams.set("auth_token", "…")
+    return url.toString()
+  } catch {
+    return stream
+  }
 }
 
 export function createVoiceStreamTransport(input: {
@@ -62,21 +75,28 @@ export function createVoiceStreamTransport(input: {
     mic.setEnabled(true)
   }
 
-  const attach = (stream: string) =>
-    new Promise<void>((resolve, reject) => {
-      const socket = new WebSocket(stream)
+  const attach = (stream: string) => {
+    const url = connectParams?.authToken ? voiceStreamUrlWithAuth(stream, connectParams.authToken) : stream
+    voiceLogStage("WS", `connect ${logStreamUrl(url)}`)
+    return new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket(url)
       ws = socket
       socket.binaryType = "arraybuffer"
       socket.onopen = () => {
+        voiceLogStage("WS", `open ${logStreamUrl(url)}`)
         input.onOpen()
         resolve()
       }
-      socket.onerror = () => reject(new Error(`voice stream connection failed (${stream})`))
+      socket.onerror = () => {
+        voiceLogStage("WS", `error ${logStreamUrl(url)} readyState=${socket.readyState}`)
+        reject(new Error(`voice stream connection failed (${logStreamUrl(url)})`))
+      }
       socket.onmessage = (message) => {
         if (typeof message.data !== "string") return
         input.onEvent(parseVoiceSidecarEvent(message.data))
       }
-      socket.onclose = () => {
+      socket.onclose = (event) => {
+        voiceLogStage("WS", `close code=${event.code} reason=${event.reason || "none"} clean=${event.wasClean}`)
         if (!input.isRunning()) return
         if (input.transport !== "browser") {
           input.onError("voice stream closed")
@@ -99,6 +119,7 @@ export function createVoiceStreamTransport(input: {
           })
       }
     })
+  }
 
   const ensureConnected = async () => {
     if (ws?.readyState === WebSocket.OPEN) return true
@@ -108,10 +129,15 @@ export function createVoiceStreamTransport(input: {
       ws = undefined
     }
     try {
+      voiceLogStage("WS", "reconnect: creating session")
       const session = await input.createSession(connectParams)
-      await attach(voiceStreamUrl(connectParams.sidecarUrl, session.id))
+      const stream = session.stream ?? voiceStreamUrl(connectParams.sidecarUrl, session.id)
+      voiceLogStage("WS", `reconnect: attach ${logStreamUrl(stream)}`)
+      await attach(stream)
       return ws?.readyState === WebSocket.OPEN
-    } catch {
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "reconnect failed"
+      voiceLogStage("WS", `reconnect failed: ${message}`)
       return false
     }
   }

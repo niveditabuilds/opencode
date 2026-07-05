@@ -3,6 +3,7 @@ import {
   matchVoiceStreamPath,
   runVoiceStream,
   voiceSessions,
+  writeLog,
   type VoiceSocket,
 } from "@opencode-ai/voice-server"
 import { Effect, Queue } from "effect"
@@ -77,7 +78,16 @@ const handleVoiceStream = Effect.fn("VoiceHttpApi.stream")(function* (
   voiceId: string,
 ) {
   const voice = voiceSessions.get(voiceId)
-  if (!voice) return HttpServerResponse.empty({ status: 404 })
+  if (!voice) {
+    writeLog("WS", `upgrade rejected voiceId=${voiceId} reason=session not found`, { source: "sidecar" })
+    return HttpServerResponse.empty({ status: 404 })
+  }
+
+  writeLog("WS", `client upgrade voiceId=${voiceId} transport=${voice.composer ? "web" : "tui"}`, {
+    voiceId: voice.id,
+    sessionId: voice.opencodeSessionId,
+    transport: voice.composer ? "web" : "tui",
+  })
 
   const socket = yield* Effect.orDie(request.upgrade)
   const write = yield* socket.writer

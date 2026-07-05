@@ -15,10 +15,15 @@ export class Speaker {
   #voiceId?: string
   #lock = Promise.resolve()
   #generation = 0
+  #speaking = false
 
   constructor(send: VoiceSender, voiceId?: string) {
     this.#send = send
     this.#voiceId = voiceId
+  }
+
+  speaking() {
+    return this.#speaking
   }
 
   interrupt() {
@@ -33,6 +38,8 @@ export class Speaker {
   }
 
   async #speakLocked(body: string, trigger: string) {
+    if (trigger === "turn_complete") this.interrupt()
+    this.#speaking = true
     const generation = this.#generation
     const shouldContinue = () => generation === this.#generation && this.#send.open
     await this.#send.sendJson({
@@ -57,6 +64,7 @@ export class Speaker {
     } finally {
       writeLog("TTS", `audio.end trigger=${trigger}`, { voiceId: this.#voiceId })
       await this.#send.sendJson({ type: "audio.end" })
+      this.#speaking = false
     }
   }
 }

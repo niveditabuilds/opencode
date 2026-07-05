@@ -55,7 +55,6 @@ voxcode tui .    # voice in the current directory
 | `voxcode` | Terminal UI + voice |
 | `voxcode tui [dir]` | Same, scoped to a directory |
 | `voxcode web` | Browser UI + voice |
-| `voxcode run …` | Pass-through to opencode (no voice) |
 
 ## Environment
 

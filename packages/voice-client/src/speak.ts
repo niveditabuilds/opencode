@@ -1,6 +1,7 @@
 /** TTS output — voice-server HTTP + local playback. Not coupled to STT or WSS session. */
 
 import { fetchVoiceFinalSpeak, fetchVoiceSpeak, type VoiceFinalSpeakPlan } from "./api"
+import type { VoiceAuth } from "./auth"
 import { voiceLogStage } from "#log"
 import { playMp3, voiceSidecarBaseUrl } from "#play"
 import { clearVoiceReplyArmed, noteVoiceAction, setVoiceOutput } from "./store"
@@ -18,6 +19,7 @@ export type SpeakTextInput = {
   raw?: boolean
   audioBytes?: Uint8Array
   shouldContinue?: () => boolean
+  auth?: VoiceAuth
 }
 
 export async function speakText(input: SpeakTextInput) {
@@ -26,7 +28,12 @@ export async function speakText(input: SpeakTextInput) {
   voiceLogStage("TTS", `fetch ${text.length} chars raw=${input.raw ?? false}`)
   const bytes =
     input.audioBytes ??
-    base64ToBytes((await fetchVoiceSpeak({ sidecarUrl: input.sidecarUrl, text, raw: input.raw ?? false })).data)
+    base64ToBytes((await fetchVoiceSpeak({
+      sidecarUrl: input.sidecarUrl,
+      text,
+      raw: input.raw ?? false,
+      auth: input.auth,
+    })).data)
   if (input.shouldContinue && !input.shouldContinue()) {
     voiceLogStage("TTS", "abort stale generation after fetch")
     return
@@ -43,6 +50,7 @@ export type SpeakPartsInput = {
   shouldContinue?: () => boolean
   resolveAudioBytes?: (text: string, index: number) => Uint8Array | undefined
   onPartStart?: (text: string, index: number) => void
+  auth?: VoiceAuth
 }
 
 export async function speakParts(input: SpeakPartsInput) {
@@ -57,6 +65,7 @@ export async function speakParts(input: SpeakPartsInput) {
       raw: input.raw,
       audioBytes: input.resolveAudioBytes?.(text, index),
       shouldContinue: input.shouldContinue,
+      auth: input.auth,
     })
     if (input.shouldContinue && !input.shouldContinue()) return false
   }
@@ -71,6 +80,7 @@ export type SpeakAssistantReplyInput = {
   resolveAudioBytes?: (text: string, index: number) => Uint8Array | undefined
   onPartStart?: (text: string, index: number) => void
   clearArmedOnDone?: boolean
+  auth?: VoiceAuth
 }
 
 export async function speakAssistantReply(input: SpeakAssistantReplyInput): Promise<VoiceFinalSpeakPlan> {
@@ -80,7 +90,7 @@ export async function speakAssistantReply(input: SpeakAssistantReplyInput): Prom
   noteVoiceAction(`reply-start ${reply.length} chars`)
   voiceLogStage("TTS", `reply-start ${reply.length} chars preview="${reply.slice(0, 60)}"`)
   try {
-    const plan = await fetchVoiceFinalSpeak({ sidecarUrl: input.sidecarUrl, text: reply })
+    const plan = await fetchVoiceFinalSpeak({ sidecarUrl: input.sidecarUrl, text: reply, auth: input.auth })
     voiceLogStage("TTS", `plan parts=${plan.parts.length} offer=${plan.hasOffer}`)
     await speakParts({
       sidecarUrl: input.sidecarUrl,
@@ -89,6 +99,7 @@ export async function speakAssistantReply(input: SpeakAssistantReplyInput): Prom
       shouldContinue: input.shouldContinue,
       resolveAudioBytes: input.resolveAudioBytes,
       onPartStart: input.onPartStart,
+      auth: input.auth,
     })
     voiceLogStage("TTS", "reply-done")
     noteVoiceAction("reply-done")

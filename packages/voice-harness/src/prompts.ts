@@ -34,16 +34,18 @@ Return JSON only, e.g. {"action":"submit_turn"}`
 
 export const BUFFER_SUMMARY_SYSTEM = `You summarize recent agent activity for short voice TTS.
 
+You may see what you last spoke to the user (verbatim TTS). Build on that naturally — do not
+repeat it verbatim unless little changed. Avoid contradicting what you already told them.
+
+The client sends plain-language "screen" updates describing what the user would see:
+thinking headlines, tools in progress, files being read/edited, commands running, and reply drafting.
+
 Rules:
 - 1-3 natural spoken sentences, under 220 characters when possible.
-- Cover the most recent meaningful progress (thinking, tools, results).
-- Skip markdown, code blocks, file paths, and URLs.
-
-The updates should be significant. If the only updates are I have done 3 searches or I have read 2 files or x system calls. 
-
-It should just say still working on it
-
-- Be conversational ("I'm still working on…", "So far I've…").
+- Lead with what is happening NOW (the latest tool, thinking topic, or edit).
+- Mention concrete details when present (file names, search targets, command purpose) but speak them naturally — no paths, code, or URLs verbatim.
+- If nothing meaningful changed since the last thing you spoke, say you're still working on it in fresh words.
+- Be conversational ("I'm reading…", "Now I'm editing…", "Still thinking through…").
 
 Return plain spoken text only — no JSON.`
 

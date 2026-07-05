@@ -4,6 +4,7 @@ import {
   type VoiceLogEntry,
   type VoiceLogStage,
 } from "./log-core"
+import { voiceAuthHeaders } from "./auth"
 
 export {
   clearVoiceLogContext,
@@ -25,6 +26,7 @@ const buffer: string[] = []
 let pending: VoiceLogEntry[] = []
 let flushScheduled = false
 let sidecarUrl: (() => string) | undefined
+let voiceAuth: (() => import("./auth").VoiceAuth | undefined) | undefined
 let enabled = true
 let listener: ((line: string) => void) | undefined
 let lastLine = ""
@@ -68,6 +70,7 @@ async function flushPending() {
       headers: {
         "Content-Type": "application/json",
         "X-OpenCode-Voice-Log": "web",
+        ...voiceAuthHeaders(voiceAuth?.()),
       },
       keepalive: true,
       body: JSON.stringify({ entries }),
@@ -83,8 +86,13 @@ async function flushPending() {
   }
 }
 
-export function initVoiceLog(input?: { sidecarUrl?: () => string; active?: () => boolean }) {
+export function initVoiceLog(input?: {
+  sidecarUrl?: () => string
+  voiceAuth?: () => import("./auth").VoiceAuth | undefined
+  active?: () => boolean
+}) {
   sidecarUrl = input?.sidecarUrl
+  voiceAuth = input?.voiceAuth
   if (input?.active) enabled = input.active()
 }
 

@@ -1,4 +1,4 @@
-import { chatComplete, parseJsonObject } from "./chat"
+import { chatComplete, parseJsonObject, responseComplete } from "./chat"
 import { BUFFER_SUMMARY_SYSTEM, ROUTER_SYSTEM, TURN_COMPLETE_SYSTEM } from "./prompts"
 import { voiceSummary } from "./summary"
 import type {
@@ -7,6 +7,7 @@ import type {
   HarnessPhase,
   HarnessRouteDecision,
   HarnessUpdate,
+  ResponseComplete,
 } from "./types"
 import { PERIODIC_INTERVAL_S } from "./types"
 
@@ -20,6 +21,7 @@ type BufferEntry = {
 
 export type VoiceHarnessOptions = {
   complete?: ChatComplete
+  responseComplete?: ResponseComplete
   now?: () => number
 }
 
@@ -27,18 +29,20 @@ export class VoiceHarness {
   phase: HarnessPhase = "listening"
   working = false
   buffer: BufferEntry[] = []
-  summarySeed = ""
   lastSpoken = ""
+  #summaryResponseId = ""
   lastSubmitted = ""
   progress: Record<string, unknown> = {}
   lastPeriodicAt = 0
   turnId = 0
 
   #complete: ChatComplete
+  #responseComplete: ResponseComplete
   #now: () => number
 
   constructor(options?: VoiceHarnessOptions) {
     this.#complete = options?.complete ?? chatComplete
+    this.#responseComplete = options?.responseComplete ?? responseComplete
     this.#now = options?.now ?? (() => Date.now() / 1000)
   }
 
@@ -58,9 +62,10 @@ export class VoiceHarness {
     }
     if (event === "progress") {
       this.progress = coerceProgress(payload)
+      const screen = typeof this.progress.screen === "string" ? this.progress.screen.trim() : ""
       this.buffer.push({
         kind: "progress",
-        text: JSON.stringify(this.progress, Object.keys(this.progress).sort()),
+        text: screen || JSON.stringify(this.progress, Object.keys(this.progress).sort()),
         at: this.#now(),
       })
       return []
@@ -92,7 +97,7 @@ export class VoiceHarness {
     if (bufferText) prompt = `activity so far:\n${bufferText}\n\nfinal reply:\n${reply.trim()}`
     const speak = await this.#spokenText(prompt, TURN_COMPLETE_SYSTEM, voiceSummary(reply))
     this.buffer = []
-    this.summarySeed = ""
+    this.#summaryResponseId = ""
     this.progress = {}
     if (speak) this.lastSpoken = speak
     const actions: HarnessAction[] = [
@@ -190,30 +195,38 @@ export class VoiceHarness {
 
   async #summarizeBuffer(trigger: string) {
     const body = this.#bufferText()
-    if (!body && !this.summarySeed) return ""
-    let user = `trigger=${trigger}\n`
-    if (this.summarySeed) user += `prior summary:\n${this.summarySeed}\n\n`
-    user += `updates:\n${body || "(none)"}`
-    const speak = await this.#spokenText(
-      user,
-      BUFFER_SUMMARY_SYSTEM,
-      this.summarySeed || "Still working on that.",
-    )
-    this.buffer = []
-    if (speak) {
-      this.summarySeed = speak
-      this.buffer.push({ kind: "summary", text: speak, at: this.#now() })
+    if (!body && !this.lastSpoken && !this.#summaryResponseId) return ""
+    const user = `trigger=${trigger}\nupdates:\n${body || "(none)"}`
+    const fallback = this.lastSpoken || "Still working on that."
+    try {
+      const speak = (
+        await this.#responseComplete({
+          system: BUFFER_SUMMARY_SYSTEM,
+          user,
+          maxTokens: 160,
+          assistant: this.#summaryResponseId ? undefined : this.lastSpoken || undefined,
+          previousResponseId: this.#summaryResponseId || undefined,
+          onResponseId: (id) => {
+            this.#summaryResponseId = id
+          },
+        })
+      ).trim()
+      this.buffer = []
+      if (speak) this.lastSpoken = speak
+      return speak
+    } catch {
+      this.#summaryResponseId = ""
+      this.buffer = []
+      return fallback.trim()
     }
-    return speak
   }
 
   #bufferCount() {
-    return this.buffer.filter((entry) => entry.kind !== "summary").length
+    return this.buffer.length
   }
 
   #bufferText() {
     return this.buffer
-      .filter((entry) => entry.kind !== "summary")
       .map((entry) => `[${entry.kind.replaceAll("_", " ")}] ${entry.text}`.trim())
       .join("\n")
       .trim()
@@ -231,7 +244,7 @@ export class VoiceHarness {
 function coerceProgress(payload: HarnessUpdate) {
   if (payload.progress && typeof payload.progress === "object") return { ...payload.progress }
   const out: Record<string, unknown> = {}
-  for (const key of ["reads", "searches", "lists", "shell", "thinking"] as const) {
+  for (const key of ["screen", "items", "current", "thinking", "reads", "searches", "lists", "shell"] as const) {
     if (key in payload) out[key] = payload[key]
   }
   return out

@@ -1,4 +1,4 @@
-.PHONY: dist dist-opencode dist-voxcode web web-server web-app clean help
+.PHONY: dist dist-opencode dist-voxcode web web-server web-app desktop clean help
 
 BUN ?= bun
 ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -22,6 +22,7 @@ help:
 	@echo "  make web               run the web app locally (server + app dev servers, hot reload)"
 	@echo "  make web-server        run just the opencode server + voice sidecar"
 	@echo "  make web-app           run just the web app dev server"
+	@echo "  make desktop           run the desktop (Electron) app locally with hot reload"
 	@echo "  make clean             remove local dist artifacts"
 	@echo
 	@echo "Optional:"
@@ -72,6 +73,18 @@ web:
 		$(BUN) run --cwd $(ROOT)packages/opencode --conditions=browser ./src/index.ts serve --port $(SERVER_PORT) --cors http://localhost:$(WEB_PORT) & \
 		$(BUN) run --cwd $(ROOT)packages/app dev --port $(WEB_PORT) & \
 		wait
+
+# Desktop (Electron) app. The main process spawns its own embedded opencode server (with the voice
+# sidecar), so no separate server is needed — predev builds it. Voice needs XAI_API_KEY in this shell.
+desktop:
+	@echo "→ desktop (Electron) app with hot reload"
+	@if [ -z "$$XAI_API_KEY" ]; then echo "  ! XAI_API_KEY not set — voice will be disabled"; fi
+	@# bun skips Electron's postinstall, so the binary may be missing after install. Fetch it once.
+	@if [ ! -f "$(ROOT)packages/desktop/node_modules/electron/path.txt" ]; then \
+		echo "→ downloading Electron binary (first run)"; \
+		$(BUN) $(ROOT)packages/desktop/node_modules/electron/install.js; \
+	fi
+	$(BUN) run --cwd $(ROOT)packages/desktop dev
 
 clean:
 	rm -rf $(ROOT)packages/voxcode/dist

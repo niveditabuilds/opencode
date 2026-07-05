@@ -17,6 +17,7 @@ import { base64ToBytes, speakText as speakTextOutput } from "./speak"
 import { createVoiceSidecarSession, parseVoiceSidecarEvent, type VoiceSidecarEvent } from "./sidecar"
 import { armVoiceReply, clearVoiceReplyArmed, setVoiceOutput, voiceOutput } from "./store"
 import type { VoiceOptions, VoicePhase } from "./types"
+import { voiceAuthHeaders, voiceAuthToken, voiceStreamUrlWithAuth } from "./auth"
 import { voiceControlPlaneUrl, voiceStreamUrl } from "./url"
 
 export type { VoiceOptions, TuiVoiceOptions } from "./types"
@@ -48,9 +49,11 @@ export function createVoice(options: VoiceOptions) {
   let playGeneration = 0
   let ttsActive = false
   let feedTimer: ReturnType<typeof setInterval> | undefined
-  let sink: AudioSink | undefined
+  let playback: AudioSink | undefined
+  let streamOpen = false
   let audioGeneration = 0
   let speakingSince = 0
+  let bestHeard = ""
 
   const sidecar = () =>
     options.sidecarUrl?.() ??
@@ -73,7 +76,12 @@ export function createVoice(options: VoiceOptions) {
 
   const postUpdate = (payload: Record<string, unknown>) => {
     if (!voiceID) return Promise.resolve()
-    return postVoiceSessionUpdate({ sidecarUrl: sidecar, voiceID, payload }).then(
+    return postVoiceSessionUpdate({
+      sidecarUrl: sidecar,
+      voiceID,
+      payload,
+      auth: options.voiceAuth?.(),
+    }).then(
       () => {},
       () => {},
     )
@@ -104,8 +112,7 @@ export function createVoice(options: VoiceOptions) {
   // speak action this client plays.
   const submitAssistantReply = (reply: string) => {
     stopFeed()
-    voiceLogStage("STATE", "post working=false (turn-complete)")
-    void postUpdate({ event: "working", working: false })
+    voiceLogStage("STATE", "post turn-complete")
     return postUpdate({ event: "turn_complete", reply })
   }
 
@@ -118,30 +125,40 @@ export function createVoice(options: VoiceOptions) {
   // ----- streamed TTS playback (mechanical; mic muted while speaking) --
 
   // The sidecar streams PCM frames: audio.start → audio.delta* → audio.end. TUI pipes them
-  // to ffplay as they arrive; web schedules them on Web Audio. Mic is muted while speaking.
+  // to ffplay as they arrive; web schedules them on Web Audio. Keep `playback` until the sink
+  // actually finishes — audio.end arrives when synthesis completes, not when speakers go quiet.
+  const stopStreamPlayback = () => {
+    streamOpen = false
+    playback?.stop()
+    playback = undefined
+    stopMp3()
+  }
+
   const startAudio = (sampleRate: number, trigger?: string) => {
     audioGeneration++
-    sink?.stop()
+    stopStreamPlayback()
+    streamOpen = true
     ttsActive = true
     speakingSince = Date.now()
     if (!fullDuplex) stream.setMicEnabled(false)
     setVoiceOutput("speaking", true)
     setDisplayPhase("speaking")
-    sink = createAudioSink({ sampleRate: sampleRate || 24000 })
+    playback = createAudioSink({ sampleRate: sampleRate || 24000 })
     voiceLogStage("HARNESS", `audio.start${trigger ? ` (${trigger})` : ""}`)
   }
 
   const pushAudio = (data: string) => {
-    if (!sink || !data) return
-    sink.push(base64ToBytes(data))
+    if (!streamOpen || !playback || !data) return
+    playback.push(base64ToBytes(data))
   }
 
   const endAudio = () => {
-    const finished = sink
-    sink = undefined
+    streamOpen = false
+    const finished = playback
     const generation = audioGeneration
     void (finished ? finished.end() : Promise.resolve()).then(() => {
       if (generation !== audioGeneration) return
+      if (playback === finished) playback = undefined
       ttsActive = false
       setVoiceOutput("speaking", false)
       if (running) stream.setMicEnabled(true)
@@ -152,9 +169,7 @@ export function createVoice(options: VoiceOptions) {
   const stopPlayback = () => {
     playGeneration++
     audioGeneration++
-    stopMp3()
-    sink?.stop()
-    sink = undefined
+    stopStreamPlayback()
     ttsActive = false
     setVoiceOutput("speaking", false)
     if (running) stream.setMicEnabled(true)
@@ -175,6 +190,7 @@ export function createVoice(options: VoiceOptions) {
         sidecarUrl: sidecar,
         text: trimmed,
         raw: true,
+        auth: options.voiceAuth?.(),
         shouldContinue: () => generation === playGeneration && running,
       })
     } catch (error) {
@@ -192,8 +208,14 @@ export function createVoice(options: VoiceOptions) {
   // ----- actions (sidecar → client) ------------------------------------
 
   const runTurn = (text: string) => {
-    const trimmed = text.trim()
+    const harness = text.trim()
+    const heard = bestHeard.trim()
+    const trimmed = heard.length > harness.length ? heard : harness
+    bestHeard = ""
     if (!trimmed) return
+    if (heard.length > harness.length) {
+      voiceLogStage("STATE", `submit heard=${heard.length} chars over harness=${harness.length}`)
+    }
     setAwaitingReply(true)
     options.submitTranscript(trimmed)
     startFeed()
@@ -220,7 +242,7 @@ export function createVoice(options: VoiceOptions) {
       return
     }
     if (event.action === "speak") {
-      if (event.text?.trim()) void playSpeakFallback(event.text)
+      if (event.text?.trim() && !event.trigger) void playSpeakFallback(event.text)
       return
     }
     if (event.action === "set_phase") {
@@ -280,6 +302,8 @@ export function createVoice(options: VoiceOptions) {
       return
     }
     if (event.type === "transcript") {
+      const line = event.text.trim()
+      if (line.length > bestHeard.length) bestHeard = line
       // Barge-in: the mic is live during playback on full-duplex transports. If the user talks over
       // the agent, stop the speaker and hand the floor back; the harness router decides whether the
       // new utterance is a fresh turn or a redirect once it streams in.
@@ -297,9 +321,10 @@ export function createVoice(options: VoiceOptions) {
       }
       if (event.speechFinal) {
         voiceLogStage("STATE", `transcript-final "${event.text.slice(0, 60)}"`)
+        if (event.text.trim() && !ttsActive && !options.working()) options.onTranscript?.(event.text)
         setHearing("")
+        return
       }
-      return
     }
     if (event.type === "status") {
       if (event.state === "idle" && event.reason === "no speech") {
@@ -313,6 +338,7 @@ export function createVoice(options: VoiceOptions) {
     }
     if (event.type === "error") {
       if (ttsActive) stopPlayback()
+      voiceLogStage("STATE", `server error: ${event.message}`)
       options.onError(event.message)
     }
   }
@@ -327,6 +353,7 @@ export function createVoice(options: VoiceOptions) {
       agent: params.agent,
       server: params.server,
       composer: transport === "browser",
+      auth: options.voiceAuth?.(),
     })
 
   const stream = createVoiceStreamTransport({
@@ -353,14 +380,10 @@ export function createVoice(options: VoiceOptions) {
   const stop = () => {
     voiceLogStage("STATE", "stop")
     running = false
-    playGeneration++
-    audioGeneration++
-    stopMp3()
-    sink?.stop()
-    sink = undefined
-    ttsActive = false
+    stopPlayback()
     stopFeed()
     voiceID = ""
+    bestHeard = ""
     clearVoiceLogContext(["voiceId", "turnId"])
     setHearing("")
     stream.close()
@@ -378,7 +401,15 @@ export function createVoice(options: VoiceOptions) {
     const sidecarUrl = sidecar()
     const directory = options.directory()
     const server = voiceControlPlaneUrl({ url: options.opencodeUrl(), serverUrl: options.serverUrl?.() })
-    const params: ConnectParams = { sidecarUrl, directory, sessionID, agent: options.agent(), server }
+    const authToken = voiceAuthToken(options.voiceAuth?.())
+    const params: ConnectParams = {
+      sidecarUrl,
+      directory,
+      sessionID,
+      agent: options.agent(),
+      server,
+      authToken,
+    }
 
     running = true
     setActive(true)
@@ -389,7 +420,9 @@ export function createVoice(options: VoiceOptions) {
 
     stream.setConnectParams(params)
     const session = await createSession(params)
-    await stream.attach(voiceStreamUrl(sidecarUrl, session.id))
+    const streamUrl = session.stream ?? voiceStreamUrl(sidecarUrl, session.id)
+    voiceLogStage("STATE", `attach stream=${streamUrl}`)
+    await stream.attach(streamUrl)
     await stream.startMic()
   }
 

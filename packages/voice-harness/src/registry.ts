@@ -44,10 +44,13 @@ export class HarnessRegistry {
   async applyUpdate(voiceId: string, payload: HarnessUpdate) {
     const harness = this.getOrCreate(voiceId)
     const event = String(payload.event ?? "").trim().toLowerCase()
-    const actions =
-      event === "turn_complete"
-        ? await harness.noteTurnComplete(String(payload.reply ?? payload.text ?? ""))
-        : harness.pushUpdate(payload)
+    if (event === "turn_complete") {
+      harness.working = false
+      const actions = await harness.noteTurnComplete(String(payload.reply ?? payload.text ?? ""))
+      this.#emit(voiceId, actions)
+      return actions
+    }
+    const actions = harness.pushUpdate(payload)
     this.#emit(voiceId, actions)
     return actions
   }

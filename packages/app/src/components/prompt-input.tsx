@@ -33,6 +33,7 @@ import {
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
 import { useServerSDK } from "@/context/server-sdk"
+import { useServer } from "@/context/server"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
 import { Button } from "@opencode-ai/ui/button"
@@ -68,7 +69,7 @@ import { PromptContextItems } from "./prompt-input/context-items"
 import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
-import { createVoiceComposerState, voiceComposerBorderClass, voiceSidecarBaseUrl } from "./prompt-input/voice"
+import { createVoiceComposerState, voiceComposerBorderClass } from "./prompt-input/voice"
 import { buildVoiceProgressSnapshot, collectActiveTurnParts } from "@opencode-ai/voice-client/progress"
 import { PromptVoiceComposer } from "./prompt-input/voice-composer"
 import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
@@ -220,6 +221,7 @@ const EXAMPLES = [
 export const PromptInput: Component<PromptInputProps> = (props) => {
   const sdk = useSDK()
   const serverSDK = useServerSDK()
+  const server = useServer()
 
   const sync = useSync()
   const files = useFile()
@@ -427,8 +429,13 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const voice = createVoiceComposerState({
     working,
     connect: {
-      sidecarUrl: voiceSidecarBaseUrl,
       opencodeUrl: () => serverSDK().url,
+      serverUrl: () => serverSDK().url,
+      voiceAuth: () => {
+        const conn = server.current
+        if (!conn || conn.type !== "http" || !conn.http.password) return undefined
+        return { username: conn.http.username, password: conn.http.password }
+      },
       directory: () => sdk().directory,
       sessionID: () => props.controls.session.id,
       agent: () => props.controls.agents.current,

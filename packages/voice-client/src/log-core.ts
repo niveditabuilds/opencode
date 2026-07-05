@@ -1,4 +1,4 @@
-export type VoiceLogStage = "REPLY" | "TTS" | "API" | "PLAY" | "STATE" | "RUNTIME" | "HARNESS"
+export type VoiceLogStage = "REPLY" | "TTS" | "API" | "PLAY" | "STATE" | "RUNTIME" | "HARNESS" | "WS"
 
 export type VoiceLogTransport = "tui" | "web"
 

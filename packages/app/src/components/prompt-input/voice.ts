@@ -1,13 +1,14 @@
 import { createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
+import type { VoiceAuth } from "@opencode-ai/voice-client/auth"
 import { createVoice, type VoicePhase } from "@opencode-ai/voice-client/runtime"
 import type { VoiceProgressSnapshot } from "@opencode-ai/voice-client/api"
 import type { VoicePermissionReply } from "@opencode-ai/voice-client/panel"
 import { initVoiceLog, setVoiceLogContext, setVoiceLogEnabled } from "@opencode-ai/voice-client/log"
 import { speakAssistantReply } from "@opencode-ai/voice-client/speak"
 import { armVoiceReply, noteVoiceAction, voiceOutput } from "@opencode-ai/voice-client/store"
-import { hostedVoiceSidecarUrl } from "@/utils/hosted-url"
+import { voiceControlPlaneUrl } from "@opencode-ai/voice-client/url"
 
 export type { VoicePhase }
 export type VoiceDisplayState = VoicePhase | "off"
@@ -24,18 +25,15 @@ export function voiceStatusKey(state: VoiceDisplayState) {
   return statusKey[state]
 }
 
-export function voiceSidecarBaseUrl() {
-  return hostedVoiceSidecarUrl()
-}
-
 function disclosureDismissed() {
   if (typeof localStorage === "undefined") return false
   return localStorage.getItem("opencode.voice.disclosure") === "1"
 }
 
 export type VoiceConnectOptions = {
-  sidecarUrl?: () => string
   opencodeUrl: () => string
+  serverUrl?: () => string | undefined
+  voiceAuth?: () => VoiceAuth | undefined
   directory: () => string
   sessionID: () => string | undefined
   agent: () => string
@@ -68,11 +66,16 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
   let lastSpokenReplyKey = ""
   let speakInFlight = false
 
-  const sidecarUrl = () => options.connect?.sidecarUrl?.() ?? voiceSidecarBaseUrl()
+  const sidecarUrl = () =>
+    voiceControlPlaneUrl({
+      url: options.connect!.opencodeUrl(),
+      serverUrl: options.connect?.serverUrl?.(),
+    })
 
   const ensureVoiceLog = () => {
     initVoiceLog({
-      sidecarUrl: options.connect?.sidecarUrl ?? voiceSidecarBaseUrl,
+      sidecarUrl,
+      voiceAuth: () => options.connect?.voiceAuth?.(),
       active: () => voiceOutput.listenActive || voiceOutput.awaitingReply,
     })
     setVoiceLogContext({ transport: "web" })
@@ -81,8 +84,9 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
 
   const voice = createVoice({
     transport: "browser",
-    sidecarUrl: options.connect?.sidecarUrl,
     opencodeUrl: () => options.connect!.opencodeUrl(),
+    serverUrl: () => options.connect?.serverUrl?.(),
+    voiceAuth: () => options.connect?.voiceAuth?.(),
     directory: () => options.connect!.directory(),
     sessionID: () => options.connect!.sessionID(),
     agent: () => options.connect!.agent(),
@@ -140,7 +144,12 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
 
     const speak = voiceOutput.listenActive
       ? voice.submitAssistantReply(reply)
-      : speakAssistantReply({ sidecarUrl, reply, clearArmedOnDone: true })
+      : speakAssistantReply({
+          sidecarUrl,
+          reply,
+          clearArmedOnDone: true,
+          auth: options.connect?.voiceAuth?.(),
+        })
 
     void speak
       .catch((error) => {

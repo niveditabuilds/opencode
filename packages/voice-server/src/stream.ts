@@ -2,6 +2,7 @@ import { defaultHarnessRegistry, PERIODIC_INTERVAL_S, type HarnessAction } from 
 import { emitHarnessActions, Speaker, type VoiceSender } from "./harness-actions"
 import type { VoiceSession } from "./sessions"
 import { SttError, XaiStreamingStt } from "./stt"
+import { bestTranscript } from "./transcript"
 import { clearLogContext, setLogContext, writeLog } from "./voice-log"
 
 export type VoiceSocket = {
@@ -59,6 +60,14 @@ export async function runVoiceStream(ws: VoiceSocket, voice: VoiceSession) {
     outboxWait?.()
   })
 
+  let actionQueue = Promise.resolve()
+  const runActions = (actions: HarnessAction[]) => {
+    actionQueue = actionQueue.then(() =>
+      emitHarnessActions({ send: sender, speaker, actions, voiceId: voice.id }),
+    )
+    return actionQueue
+  }
+
   await sendJson({
     type: "ready",
     voiceID: voice.id,
@@ -69,9 +78,16 @@ export async function runVoiceStream(ws: VoiceSocket, voice: VoiceSession) {
 
   let acceptAudio = true
   let stopped = false
+  let periodicBusy = false
   const stopPeriodic = startPeriodic(async () => {
-    const actions = await registry.periodicTick(voice.id)
-    if (actions.length) await emitHarnessActions({ send: sender, speaker, actions, voiceId: voice.id })
+    if (periodicBusy || speaker.speaking()) return
+    periodicBusy = true
+    try {
+      const actions = await registry.periodicTick(voice.id)
+      if (actions.length) await runActions(actions)
+    } finally {
+      periodicBusy = false
+    }
   })
 
   const outboxLoop = (async () => {
@@ -84,7 +100,7 @@ export async function runVoiceStream(ws: VoiceSocket, voice: VoiceSession) {
         continue
       }
       const action = outbox.shift()
-      if (action) await emitHarnessActions({ send: sender, speaker, actions: [action], voiceId: voice.id })
+      if (action) await runActions([action])
     }
   })()
 
@@ -96,7 +112,7 @@ export async function runVoiceStream(ws: VoiceSocket, voice: VoiceSession) {
         text = await listenOnce(ws, stt, () => acceptAudio)
       } catch (error) {
         const message = error instanceof SttError ? error.message : "stt error"
-        writeLog("STATE", `stt error: ${message}`, { voiceId: voice.id })
+        writeLog("STT", message, { voiceId: voice.id })
         await sendJson({ type: "error", message })
         continue
       }
@@ -111,7 +127,7 @@ export async function runVoiceStream(ws: VoiceSocket, voice: VoiceSession) {
       writeLog("STATE", `utterance final chars=${text.length}`, { voiceId: voice.id })
       await sendJson({ type: "status", state: "transcribing", text })
       const actions = await registry.routeUtterance(voice.id, text)
-      await emitHarnessActions({ send: sender, speaker, actions, voiceId: voice.id })
+      await runActions(actions)
       acceptAudio = true
       await sendJson({ type: "status", state: "listening" })
     }
@@ -167,6 +183,7 @@ async function transcribeFrames(
 ) {
   let captured = ""
   let stopped = false
+  let utteranceClosed = false
   const committed: string[] = []
   const outbound: Array<Record<string, unknown>> = []
   let notify: (() => void) | undefined
@@ -191,32 +208,47 @@ async function transcribeFrames(
     }
   })()
 
+  const noteTranscript = (full: string) => {
+    const trimmed = full.trim()
+    if (!trimmed || trimmed.length <= captured.length) return
+    captured = trimmed
+  }
+
   const onEvent = (event: Record<string, unknown>) => {
     if (event.type !== "transcript.partial") return
     const text = String(event.text ?? "").trim()
     const speechFinal = event.speech_final === true
     const isFinal = event.is_final === true
+    if (isFinal && text) committed.push(text)
+    const merged = bestTranscript(committed, text)
     if (speechFinal) {
-      const full = text || committed.join(" ").trim()
-      outbound.push({ type: "transcript", text: full, final: true, speechFinal: true })
-      captured = full
-      stopped = true
-      halt()
+      const before = captured.length
+      noteTranscript(merged)
+      const full = captured || merged
+      if (!full) return
+      if (!utteranceClosed) {
+        outbound.push({ type: "transcript", text: full, final: true, speechFinal: true })
+        utteranceClosed = true
+        stopped = true
+        halt()
+      } else if (captured.length > before) {
+        outbound.push({ type: "transcript", text: full, final: true, speechFinal: true })
+      }
       notify?.()
       return
     }
     if (isFinal) {
-      if (text) committed.push(text)
+      const display = bestTranscript(committed, "")
       outbound.push({
         type: "transcript",
-        text: committed.join(" ").trim(),
+        text: display,
         final: true,
         speechFinal: false,
       })
       notify?.()
       return
     }
-    const display = `${committed.join(" ")} ${text}`.trim()
+    const display = merged || `${committed.join(" ")} ${text}`.trim()
     outbound.push({ type: "transcript", text: display, final: false, speechFinal: false })
     notify?.()
   }
@@ -229,8 +261,7 @@ async function transcribeFrames(
     notify?.()
     await pump
   }
-  const stripped = captured.trim()
-  return stripped || null
+  return captured.trim() || null
 }
 
 async function* frameIterator(

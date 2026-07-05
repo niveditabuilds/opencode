@@ -1,11 +1,22 @@
 import { voiceLogStage } from "#log"
+import { voiceAuthHeaders, type VoiceAuth } from "./auth"
 import { voiceSidecarBaseUrl } from "#play"
 
+export type VoiceProgressItem = {
+  kind: "reasoning" | "tool" | "text" | "subtask"
+  status: "pending" | "running" | "completed" | "error" | "done"
+  label: string
+  detail?: string
+}
+
 export type VoiceProgressSnapshot = {
-  reads: number
-  searches: number
-  lists: number
-  shell: number
+  /** Multi-line plain-language picture of what the user sees on screen */
+  screen: string
+  /** Structured trail of activity for the active turn */
+  items: VoiceProgressItem[]
+  /** Single best line for what the agent is doing right now */
+  current?: string
+  /** True while reasoning or a tool is in flight */
   thinking: boolean
 }
 
@@ -22,10 +33,18 @@ function resolveSidecarUrl(sidecarUrl?: string | (() => string)) {
   return (sidecarUrl ?? voiceSidecarBaseUrl()).replace(/\/+$/, "")
 }
 
-async function postJson<T>(base: string, path: string, body: Record<string, unknown>): Promise<T> {
+async function postJson<T>(
+  base: string,
+  path: string,
+  body: Record<string, unknown>,
+  auth?: VoiceAuth,
+): Promise<T> {
   const url = `${base}${path}`
   voiceLogStage("API", `POST ${path} body=${JSON.stringify(body).slice(0, 120)}`)
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...voiceAuthHeaders(auth),
+  }
   if (typeof globalThis.localStorage !== "undefined") headers["X-OpenCode-Voice-Log"] = "web"
   const res = await fetch(url, {
     method: "POST",
@@ -57,17 +76,32 @@ async function postJson<T>(base: string, path: string, body: Record<string, unkn
   return data as T
 }
 
-export async function fetchVoiceFinalSpeak(input: { sidecarUrl?: string | (() => string); text: string }) {
-  return postJson<VoiceFinalSpeakPlan>(resolveSidecarUrl(input.sidecarUrl), "/voice/final-speak", {
-    text: input.text,
-  })
+export async function fetchVoiceFinalSpeak(input: {
+  sidecarUrl?: string | (() => string)
+  text: string
+  auth?: VoiceAuth
+}) {
+  return postJson<VoiceFinalSpeakPlan>(
+    resolveSidecarUrl(input.sidecarUrl),
+    "/voice/final-speak",
+    {
+      text: input.text,
+    },
+    input.auth,
+  )
 }
 
-export async function fetchVoiceSpeak(input: { sidecarUrl?: string | (() => string); text: string; raw?: boolean }) {
+export async function fetchVoiceSpeak(input: {
+  sidecarUrl?: string | (() => string)
+  text: string
+  raw?: boolean
+  auth?: VoiceAuth
+}) {
   return postJson<{ text: string; format: string; encoding: string; data: string }>(
     resolveSidecarUrl(input.sidecarUrl),
     "/voice/speak",
     { text: input.text, raw: input.raw ?? false },
+    input.auth,
   )
 }
 
@@ -75,10 +109,12 @@ export async function postVoiceSessionUpdate(input: {
   sidecarUrl?: string | (() => string)
   voiceID: string
   payload: Record<string, unknown>
+  auth?: VoiceAuth
 }) {
   return postJson<{ ok: boolean; actions?: unknown[] }>(
     resolveSidecarUrl(input.sidecarUrl),
     `/voice/session/${input.voiceID}/update`,
     input.payload,
+    input.auth,
   )
 }

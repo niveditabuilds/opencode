@@ -3,7 +3,7 @@ import { defaultHarnessRegistry } from "@opencode-ai/voice-harness"
 import { planFinalSpeech, speakText } from "./speech-plan"
 import { sessionJson, voiceSessions, type CreateSessionInput } from "./sessions"
 import { XaiBatchTts } from "./tts"
-import { requireXaiApiKey, SttError, TtsError } from "./xai"
+import { requireXaiApiKey, SttError, TtsError, verifyXaiApiKey } from "./xai"
 import {
   appendClientLogEntries,
   setLogContext,
@@ -23,22 +23,33 @@ function badRequest(message: string) {
   return json({ error: message }, 400)
 }
 
-export function voiceHealth() {
+export async function voiceHealth() {
   const stt: Record<string, unknown> = { provider: "xai" }
+  const tts: Record<string, unknown> = { provider: "xai" }
+  let keyError: string | undefined
   try {
     requireXaiApiKey()
     stt.configured = true
-  } catch (error) {
-    stt.configured = false
-    stt.error = error instanceof SttError ? error.message : String(error)
-  }
-  const tts: Record<string, unknown> = { provider: "xai" }
-  try {
-    requireXaiApiKey()
     tts.configured = true
   } catch (error) {
+    keyError = error instanceof SttError ? error.message : String(error)
+    stt.configured = false
     tts.configured = false
-    tts.error = error instanceof TtsError ? error.message : String(error)
+    stt.error = keyError
+    tts.error = keyError
+  }
+  if (!keyError) {
+    try {
+      await verifyXaiApiKey()
+      stt.verified = true
+      tts.verified = true
+    } catch (error) {
+      const message = error instanceof SttError ? error.message : String(error)
+      stt.verified = false
+      tts.verified = false
+      stt.error = message
+      tts.error = message
+    }
   }
   return json({
     status: "ok",
@@ -94,12 +105,13 @@ export async function createVoiceSession(body: CreateSessionInput, base: URL) {
     sessionId: sessionID,
     transport,
   })
-  writeLog("STATE", `session created transport=${transport}`, {
+  const payload = sessionJson(voice)
+  writeLog("STATE", `session created transport=${transport} stream=${payload.stream}`, {
     voiceId: voice.id,
     sessionId: sessionID,
     transport,
   })
-  return json(sessionJson(voice), 201)
+  return json(payload, 201)
 }
 
 export async function voiceSessionUpdate(voiceId: string, body: Record<string, unknown>) {

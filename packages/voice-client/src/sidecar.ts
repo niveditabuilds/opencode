@@ -1,4 +1,6 @@
 import { voiceSidecarBaseUrl } from "#play"
+import { voiceLogStage } from "#log"
+import { voiceAuthHeaders, type VoiceAuth } from "./auth"
 
 export type VoiceHarnessAction =
   | "submit_turn"
@@ -41,11 +43,16 @@ export async function createVoiceSidecarSession(input: {
   agent?: string
   server?: string
   composer?: boolean
+  auth?: VoiceAuth
 }): Promise<VoiceSessionInfo> {
   const base = resolveSidecarUrl(input.sidecarUrl)
+  voiceLogStage("API", `POST /voice/session server=${input.server ?? base}`)
   const res = await fetch(`${base}/voice/session`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...voiceAuthHeaders(input.auth),
+    },
     body: JSON.stringify({
       directory: input.directory,
       sessionID: input.sessionID,
@@ -57,9 +64,12 @@ export async function createVoiceSidecarSession(input: {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     const message = typeof data.error === "string" ? data.error : `voice session failed (${res.status})`
+    voiceLogStage("API", `/voice/session failed status=${res.status} error=${message}`)
     throw new Error(message)
   }
-  return data as VoiceSessionInfo
+  const session = data as VoiceSessionInfo
+  voiceLogStage("API", `/voice/session ok id=${session.id} stream=${session.stream}`)
+  return session
 }
 
 function speechFinal(event: { speechFinal?: boolean; speech_final?: boolean }) {

@@ -56,4 +56,27 @@ export function xaiWsBase() {
   return xaiBaseUrl().replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://")
 }
 
+export function parseXaiApiError(body: string) {
+  if (!body.trim()) return undefined
+  try {
+    const data = JSON.parse(body) as { error?: string; message?: string }
+    return data.error ?? data.message
+  } catch {
+    return body.slice(0, 300)
+  }
+}
+
+/** Confirms XAI_API_KEY works against the xAI API (format checks alone are not enough). */
+export async function verifyXaiApiKey() {
+  const key = requireXaiApiKey()
+  const res = await fetch(`${xaiBaseUrl()}/models`, {
+    headers: { Authorization: `Bearer ${key}` },
+  })
+  if (res.ok) return
+  const message =
+    parseXaiApiError(await res.text().catch(() => "")) ??
+    `xAI API rejected XAI_API_KEY (HTTP ${res.status})`
+  throw new SttError(message)
+}
+
 export const STT_SAMPLE_RATE = 16_000

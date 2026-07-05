@@ -66,7 +66,11 @@ export function voiceLogResetOnce() {
   voiceLogOnce.seen.clear()
 }
 
-export function initVoiceLog(_input?: { sidecarUrl?: () => string; active?: () => boolean }) {}
+export function initVoiceLog(_input?: {
+  sidecarUrl?: () => string
+  voiceAuth?: () => import("./auth").VoiceAuth | undefined
+  active?: () => boolean
+}) {}
 
 export function setVoiceLogEnabled(_active: boolean) {}
 

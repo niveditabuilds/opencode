@@ -10,6 +10,7 @@
   },
   "exports": {
     "./api": "./src/api.ts",
+    "./auth": "./src/auth.ts",
     "./log": {
       "browser": "./src/log.browser.ts",
       "default": "./src/log.node.ts"

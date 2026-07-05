@@ -1,4 +1,5 @@
 import { requireXaiApiKey, SttError, STT_SAMPLE_RATE, xaiWsBase } from "./xai"
+import { writeLog } from "./voice-log"
 import { authorizedWebSocket } from "./ws"
 
 export { SttError } from "./xai"
@@ -32,10 +33,19 @@ export class XaiStreamingStt {
   }
 
   async stream(frames: AsyncIterable<Uint8Array>, onEvent: (event: SttEvent) => void) {
+    const host = new URL(this.#url).host
+    writeLog("STT", `connecting host=${host} keyChars=${this.#apiKey.length}`, { source: "sidecar" })
     const ws = authorizedWebSocket(this.#url, this.#apiKey)
     await new Promise<void>((resolve, reject) => {
-      ws.addEventListener("open", () => resolve(), { once: true })
-      ws.addEventListener("error", () => reject(new SttError("WebSocket connection failed")), { once: true })
+      ws.addEventListener("open", () => {
+        writeLog("STT", `connected host=${host}`, { source: "sidecar" })
+        resolve()
+      }, { once: true })
+      ws.addEventListener(
+        "close",
+        (event) => reject(new SttError(sttConnectError(host, event.code, event.reason))),
+        { once: true },
+      )
     })
     const created = JSON.parse(String(await waitMessage(ws))) as SttEvent
     if (created.type !== "transcript.created") throw new SttError(`unexpected first message: ${JSON.stringify(created)}`)
@@ -74,11 +84,11 @@ function waitMessage(ws: WebSocket) {
     }
     const onError = () => {
       cleanup()
-      reject(new SttError("WebSocket connection failed"))
+      reject(new SttError(sttConnectError(new URL(ws.url).host, ws.readyState === WebSocket.CLOSED ? 1006 : undefined)))
     }
-    const onClose = () => {
+    const onClose = (event: CloseEvent) => {
       cleanup()
-      reject(new SttError("WebSocket closed"))
+      reject(new SttError(sttConnectError(new URL(ws.url).host, event.code, event.reason || "closed")))
     }
     const cleanup = () => {
       ws.removeEventListener("message", onMessage)
@@ -89,4 +99,12 @@ function waitMessage(ws: WebSocket) {
     ws.addEventListener("error", onError)
     ws.addEventListener("close", onClose)
   })
+}
+
+function sttConnectError(host: string, code?: number, reason?: string) {
+  const detail = code !== undefined ? ` code=${code}${reason ? ` reason=${reason}` : ""}` : ""
+  if (code === 1002 || reason?.includes("101")) {
+    return `xAI STT WebSocket upgrade failed (host=${host}${detail}) — XAI_API_KEY may be invalid; check GET /voice/health verified=true`
+  }
+  return `xAI STT WebSocket failed (host=${host}${detail}) — verify XAI_API_KEY and network`
 }
