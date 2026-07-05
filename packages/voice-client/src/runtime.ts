@@ -75,7 +75,10 @@ export function createVoice(options: VoiceOptions) {
   // ----- harness feed (client → sidecar) -------------------------------
 
   const postUpdate = (payload: Record<string, unknown>) => {
-    if (!voiceID) return Promise.resolve()
+    if (!voiceID) {
+      voiceLogStage("STATE", `post update skipped: no voice session event=${String(payload.event ?? "")}`)
+      return Promise.resolve()
+    }
     return postVoiceSessionUpdate({
       sidecarUrl: sidecar,
       voiceID,
@@ -461,3 +464,4 @@ export function createVoice(options: VoiceOptions) {
 }
 
 export const createTuiVoice = createVoice
+export { sessionInterruptAgent } from "./session"

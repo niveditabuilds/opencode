@@ -2,12 +2,12 @@ import { createEffect, createMemo, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import type { PermissionRequest, QuestionAnswer, QuestionRequest } from "@opencode-ai/sdk/v2"
 import type { VoiceAuth } from "@opencode-ai/voice-client/auth"
-import { createVoice, type VoicePhase } from "@opencode-ai/voice-client/runtime"
-import type { VoiceProgressSnapshot } from "@opencode-ai/voice-client/api"
+import type { VoicePhase } from "@opencode-ai/voice-client/runtime"
+import type { VoiceHostConnect } from "@opencode-ai/voice-client/host"
+import { createVoiceHost } from "@opencode-ai/voice-client/host"
 import type { VoicePermissionReply } from "@opencode-ai/voice-client/panel"
 import { initVoiceLog, setVoiceLogContext, setVoiceLogEnabled } from "@opencode-ai/voice-client/log"
-import { speakAssistantReply } from "@opencode-ai/voice-client/speak"
-import { armVoiceReply, noteVoiceAction, voiceOutput } from "@opencode-ai/voice-client/store"
+import { noteVoiceAction, voiceOutput } from "@opencode-ai/voice-client/store"
 import { voiceControlPlaneUrl } from "@opencode-ai/voice-client/url"
 
 export type { VoicePhase }
@@ -30,31 +30,16 @@ function disclosureDismissed() {
   return localStorage.getItem("opencode.voice.disclosure") === "1"
 }
 
-export type VoiceConnectOptions = {
-  opencodeUrl: () => string
-  serverUrl?: () => string | undefined
-  voiceAuth?: () => VoiceAuth | undefined
-  directory: () => string
-  sessionID: () => string | undefined
-  agent: () => string
-  onError: (message: string) => void
-  onTranscript?: (text: string) => void
-  onSpeechFinal?: (text: string) => void
-  assistantReplyForVoiceTurn?: () => string | undefined
-  progressSnapshot?: () => VoiceProgressSnapshot | undefined
-  pendingQuestion?: () => QuestionRequest | undefined
-  pendingPermission?: () => PermissionRequest | undefined
-  replyQuestion?: (input: { requestID: string; answers: QuestionAnswer[] }) => void
-  rejectQuestion?: (input: { requestID: string }) => void
-  replyPermission?: (input: { requestID: string; reply: VoicePermissionReply }) => void
-  voiceReplyProbe?: () => {
-    expected: number
-    users: number
-    userMessageID?: string
-    assistantCount: number
-    reply?: string
-    blocked?: string
-  }
+export type VoiceConnectOptions = Omit<
+  VoiceHostConnect,
+  "sessionWorking" | "sessionRetrying" | "abortSession" | "submitSpeechFinal" | "messages" | "partsForMessage"
+> & {
+  sessionWorking: () => boolean
+  abortSession: (sessionID: string) => Promise<unknown>
+  messages: VoiceHostConnect["messages"]
+  partsForMessage: VoiceHostConnect["partsForMessage"]
+  submitSpeechFinal: VoiceHostConnect["submitSpeechFinal"]
+  voiceReplyProbe?: () => ReturnType<ReturnType<typeof createVoiceHost>["replyProbe"]>
 }
 
 export function createVoiceComposerState(options: { working: () => boolean; connect?: VoiceConnectOptions }) {
@@ -62,9 +47,6 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
     showDisclosure: false,
     disclosureDismissed: disclosureDismissed(),
   })
-
-  let lastSpokenReplyKey = ""
-  let speakInFlight = false
 
   const sidecarUrl = () =>
     voiceControlPlaneUrl({
@@ -82,82 +64,38 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
     setVoiceLogEnabled(true)
   }
 
-  const voice = createVoice({
+  const host = createVoiceHost({
     transport: "browser",
-    opencodeUrl: () => options.connect!.opencodeUrl(),
-    serverUrl: () => options.connect?.serverUrl?.(),
-    voiceAuth: () => options.connect?.voiceAuth?.(),
-    directory: () => options.connect!.directory(),
-    sessionID: () => options.connect!.sessionID(),
-    agent: () => options.connect!.agent(),
-    enabled: () => true,
-    working: options.working,
-    submitTranscript: (text) => {
-      options.connect?.onSpeechFinal?.(text)
+    promptSubmitArming: "always",
+    onSpeakSkip: noteVoiceAction,
+    connect: {
+      opencodeUrl: () => options.connect!.opencodeUrl(),
+      serverUrl: () => options.connect?.serverUrl?.(),
+      voiceAuth: () => options.connect?.voiceAuth?.(),
+      directory: () => options.connect!.directory(),
+      sessionID: () => options.connect!.sessionID(),
+      agent: () => options.connect!.agent(),
+      abortSession: (sessionID) => options.connect!.abortSession(sessionID),
+      messages: () => options.connect!.messages(),
+      partsForMessage: (messageID) => options.connect!.partsForMessage(messageID),
+      sessionWorking: options.working,
+      sessionRetrying: () => false,
+      onError: (message) => options.connect!.onError(message),
+      onTranscript: (text) => options.connect?.onTranscript?.(text),
+      submitSpeechFinal: (text) => options.connect!.submitSpeechFinal(text),
+      pendingQuestion: () => options.connect?.pendingQuestion?.(),
+      pendingPermission: () => options.connect?.pendingPermission?.(),
+      replyQuestion: (input) => options.connect?.replyQuestion?.(input),
+      rejectQuestion: (input) => options.connect?.rejectQuestion?.(input),
+      replyPermission: (input) => options.connect?.replyPermission?.(input),
     },
-    onTranscript: (text) => options.connect?.onTranscript?.(text),
-    assistantReplyForVoiceTurn: () => options.connect?.assistantReplyForVoiceTurn?.(),
-    progressSnapshot: () => options.connect?.progressSnapshot?.(),
-    pendingQuestion: () => options.connect?.pendingQuestion?.(),
-    pendingPermission: () => options.connect?.pendingPermission?.(),
-    replyQuestion: (input) => options.connect?.replyQuestion?.(input),
-    rejectQuestion: (input) => options.connect?.rejectQuestion?.(input),
-    replyPermission: (input) => options.connect?.replyPermission?.(input),
-    onError: (message) => options.connect?.onError(message),
   })
 
+  const voice = host.voice
+
   createEffect(() => {
-    voiceOutput.awaitingReply
-    voiceOutput.listenActive
-    options.working()
     options.connect?.voiceReplyProbe?.()
-
-    if (!voiceOutput.awaitingReply) {
-      noteVoiceAction("skip: awaitingReply false")
-      return
-    }
-    if (options.working()) {
-      noteVoiceAction("skip: session working")
-      return
-    }
-
-    const reply = options.connect?.assistantReplyForVoiceTurn?.()
-    if (!reply?.trim()) {
-      const blocked = options.connect?.voiceReplyProbe?.().blocked
-      noteVoiceAction(blocked ? `skip: ${blocked}` : "skip: no reply")
-      return
-    }
-    const replyKey = reply.trim()
-    if (lastSpokenReplyKey === replyKey) {
-      noteVoiceAction("skip: already spoken this reply")
-      return
-    }
-    if (speakInFlight) {
-      noteVoiceAction("skip: speak in flight")
-      return
-    }
-
-    lastSpokenReplyKey = replyKey
-    speakInFlight = true
-    const mode = voiceOutput.listenActive ? "listen session" : "output only"
-    noteVoiceAction(`speak: ${reply.length} chars (${mode})`)
-
-    const speak = voiceOutput.listenActive
-      ? voice.submitAssistantReply(reply)
-      : speakAssistantReply({
-          sidecarUrl,
-          reply,
-          clearArmedOnDone: true,
-          auth: options.connect?.voiceAuth?.(),
-        })
-
-    void speak
-      .catch((error) => {
-        options.connect?.onError(error instanceof Error ? error.message : "voice speak failed")
-      })
-      .finally(() => {
-        speakInFlight = false
-      })
+    host.replyProbe()
   })
 
   const display = createMemo((): VoiceDisplayState => {
@@ -200,17 +138,17 @@ export function createVoiceComposerState(options: { working: () => boolean; conn
       if (typeof localStorage !== "undefined") localStorage.setItem("opencode.voice.disclosure", "1")
       setStore({ showDisclosure: false, disclosureDismissed: true })
     },
-    expectAssistantReply: (text?: string) => {
-      lastSpokenReplyKey = ""
+    onPromptSubmit: (text: string) => {
       ensureVoiceLog()
-      if (voice.active()) {
-        voice.expectAssistantReply(text)
-        return
-      }
-      armVoiceReply(
-        `armed TTS${text?.trim() ? ` preview="${text.trim().slice(0, 40)}"` : ""}`,
-      )
+      host.onPromptSubmit(text)
     },
+    beginTurn: () => host.turn.beginTurn(),
+    runSttSubmit: host.runSttSubmit,
+    expectAssistantReply: (text?: string) => {
+      ensureVoiceLog()
+      host.expectAssistantReply(text)
+    },
+    replyProbe: host.replyProbe,
     setPhase: (_phase: VoicePhase) => {},
   }
 }

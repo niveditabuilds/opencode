@@ -61,7 +61,7 @@ export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
-  onSubmit?: () => void
+  onSubmit?: (submitted: { text: string }) => void
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
   header?: JSX.Element
@@ -1119,12 +1119,12 @@ export function Prompt(props: PromptProps) {
       mode: currentMode,
     })
     input.extmarks.clear()
+    props.onSubmit?.({ text: inputText.trim() })
     setStore("prompt", {
       input: "",
       parts: [],
     })
     setStore("extmarkToPartIndex", new Map())
-    props.onSubmit?.()
 
     // temporary hack to make sure the message is sent
     if (!props.sessionID) {

@@ -23,6 +23,8 @@
     "./progress": "./src/progress.ts",
     "./reply": "./src/reply.ts",
     "./runtime": "./src/runtime.ts",
+    "./host": "./src/host.ts",
+    "./session": "./src/session.ts",
     "./store": "./src/store.ts",
     "./sidecar": "./src/sidecar.ts",
     "./speak": "./src/speak.ts",
